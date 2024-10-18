@@ -1,5 +1,5 @@
 //
-//  ImageListStore.swift
+//  ImagesFromHtml.swift
 //  Example
 //
 //  Created by qhc_m@qq.com on 2024/1/13.
@@ -10,8 +10,8 @@ import Combine
 import RegexBuilder
 
 private let threshold = 6
-final class ImageListStore: ObservableObject, Equatable {
-    static func == (lhs: ImageListStore, rhs: ImageListStore) -> Bool {
+final class ImagesFromHtml: ObservableObject, Equatable {
+    static func == (lhs: ImagesFromHtml, rhs: ImagesFromHtml) -> Bool {
         lhs.state == rhs.state && lhs.items == rhs.items
     }
     
@@ -73,7 +73,7 @@ final class ImageListStore: ObservableObject, Equatable {
     }
 }
 
-private extension ImageListStore {
+private extension ImagesFromHtml {
     func loadMoreData() {
         guard !isLoadingMoreData else { return }
         isLoadingMoreData = true
@@ -150,7 +150,7 @@ private extension ImageListStore {
     }
 }
 
-extension ImageListStore: RandomAccessCollection {
+extension ImagesFromHtml: RandomAccessCollection {
     var startIndex: Int { items.startIndex }
     var endIndex: Int { items.endIndex }
     func formIndex(after i: inout Int) {

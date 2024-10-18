@@ -21,7 +21,7 @@ extension URL: Identifiable {
 }
 
 struct ContentView: View {
-    @ObservedObject var store: ImageListStore
+    @ObservedObject var store: ImagesFromHtml
     @State private var tapUrl: URL? = nil
     @State private var grayed: Bool = false
     var body: some View {
@@ -38,6 +38,7 @@ struct ContentView: View {
                         }
                         .overlay(alignment: .topTrailing) {
                             Text(url.pathExtension)
+                                .foregroundColor(.yellow)
                         }
                         .onAppear {
                             store.lastVisitableUrl = url
