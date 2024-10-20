@@ -2,13 +2,13 @@
 
 Pod::Spec.new do |s|
 	s.name = 'ImageKit'
-	s.version = '1.2.0'
+	s.version = '1.2.1'
 	s.description = 'ImageKit'
 	s.license = 'MIT'
 	s.summary = 'ImageKit'
 	s.homepage = 'https://saucym.github.io/'
 	s.authors = { 'saucym' => '413132340@qq.com' }
-	s.source = { :git => 'git@github.com:saucym/ImageKit.git', :branch => 'main' }
+	s.source = { :git => 'git@github.com:saucym/ImageKit.git', :tag => s.version.to_s }
 	s.ios.deployment_target = '16.0'
     s.osx.deployment_target = '13.0'
 
