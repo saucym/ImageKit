@@ -16,8 +16,12 @@ public struct URLImageLoader: ImageLoader, Equatable {
     public let request: ImageRequest
     @MainActor public init(_ request: ImageRequest) {
         self.request = request
-        if let image = try? request.cachedImage() {
-            result.value = .image(image)
+        do {
+            if let image = try request.cachedImage() {
+                result.value = .image(image)
+            }
+        } catch {
+            result.value = .error
         }
     }
     

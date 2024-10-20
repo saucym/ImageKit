@@ -7,6 +7,11 @@
 
 import Photos
 import Foundation
+#if os(OSX)
+import AppKit
+#else
+import UIKit
+#endif
 
 public protocol LoaderProtocol {
     func isValid(request: ImageRequest) -> Bool
