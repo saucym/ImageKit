@@ -19,6 +19,8 @@ A[View] -->B(Cache)
 1. Decoder: Image、Gif
 1. Processor: Predrawn、Gray
 
+https://github.com/user-attachments/assets/a66e6534-51d5-46a7-a54b-10847446486a
+
 ## Usage
      
 SwiftUI
