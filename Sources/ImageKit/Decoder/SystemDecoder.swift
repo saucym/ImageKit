@@ -84,7 +84,7 @@ extension SystemDecoder: DecoderProtocol {
                         return frameDuration.doubleValue > 0.011 ? frameDuration.doubleValue : gifDefaultFrameDuration
                     }
                     
-                    //TODO: The first picture needs to be set kCGImageSourceShouldCacheImmediately
+                    // The first picture needs to be set kCGImageSourceShouldCacheImmediately
                     var optionDict = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, nil, nil) as Dictionary
                     optionDict[kCGImageSourceShouldCacheImmediately] = kCFBooleanTrue
                     let option = optionDict as CFDictionary
