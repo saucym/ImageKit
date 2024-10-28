@@ -52,7 +52,7 @@ struct ContentView: View {
             }
         }
         .quickLookPreview($tapUrl)
-        .onChange(of: store.state.id) { _, _ in
+        .onChange(of: store.state.id) { _ in
             store.send(.fetch)
         }
         .onAppear {
