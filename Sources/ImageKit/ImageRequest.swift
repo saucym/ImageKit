@@ -61,7 +61,10 @@ public struct ImageRequest {
         public let cacher: [CacheProtocol]
         public let processor: [ProcessorProtocol]
         public let loader: [LoaderProtocol]
-        public init(disk: DiskCache = .init(), 
+        #if DEBUG
+        public var tag = 0
+        #endif
+        public init(disk: DiskCache = .init(),
              useSubDir: Bool = true,
              decoder: [DecoderProtocol] = [SystemDecoder()],
              cacher: [CacheProtocol] = [MemoryCache.shared],

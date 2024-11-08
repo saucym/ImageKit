@@ -59,20 +59,11 @@ public struct ImageView<Content>: View where Content : View {
         switch result.value {
         case .image(let image):
             #if os(iOS)
-            if loader.request.isGif != false {
-                GenericView<AutoResizeImageView> {
-                    let size = CGSize(width: loader.request.size.width, height: loader.request.size.height ?? 100)
-                    let view = AutoResizeImageView(size: size)
-                    view.contentMode = .scaleAspectFill
-                    return view
-                } updater: { view in
-                    view.image = image
-                }
-                .frame(width: loader.request.size.width, height: loader.request.size.height)
-                .clipped()
-                .contentShape(Rectangle())
+            if loader.request.context.isDisplay() {
+                iOSImageView(image)
             } else {
-                buildImageView(image)
+                Text(loader.request.isGif == false ? "\((loader.request.url as NSString).lastPathComponent)" : "gif")
+                    .frame(width: loader.request.size.width, height: loader.request.size.height ?? image.size.height / KKScreen.main.scale)
             }
             #else
             buildImageView(image)
@@ -95,6 +86,24 @@ public struct ImageView<Content>: View where Content : View {
             .frame(width: loader.request.size.width, height: loader.request.size.height)
             .clipped()
     }
+    
+    @ViewBuilder func iOSImageView(_ image: KKImage) -> some View {
+        if loader.request.isGif != false {
+            GenericView<AutoResizeImageView> {
+                let size = CGSize(width: loader.request.size.width, height: loader.request.size.height ?? 100)
+                let view = AutoResizeImageView(size: size)
+                view.contentMode = .scaleAspectFill
+                return view
+            } updater: { view in
+                view.image = image
+            }
+            .frame(width: loader.request.size.width, height: loader.request.size.height)
+            .clipped()
+            .contentShape(Rectangle())
+        } else {
+            buildImageView(image)
+        }
+    }
 }
 
 extension View {
@@ -104,6 +113,17 @@ extension View {
         #else
         self
         #endif
+    }
+}
+
+private extension ImageRequest.Context {
+    func isDisplay() -> Bool {
+        #if targetEnvironment(simulator)
+        #if DEBUG
+        return tag != 1
+        #endif
+        #endif
+        return true
     }
 }
 
