@@ -80,10 +80,10 @@ public struct ImageRequest {
     public private(set) var url: String
     public private(set) var size: Size
     public private(set) var mode: ContentMode
-    public let isGif: Bool?
+    public let isGif: Bool? // true: decode to gif, false: decode to image, nil: auto
     public let context: Context
     public var processors: RequestProcessor = .preDrawn
-    public var caches: RequestCache = [.Memory, .Disk]
+    public var caches: RequestCache
     public var info: AnyObject?
     public var asset: PHAsset?
     
@@ -92,6 +92,7 @@ public struct ImageRequest {
                 mode: ContentMode = .fill,
                 key: String? = nil,
                 processors: RequestProcessor = .preDrawn,
+                caches: RequestCache = [.Memory, .Disk],
                 isGif: Bool? = nil,
                 context: Context = .default) {
         self.key = key ?? ImageRequest.cacheKeyFor(url)
@@ -99,6 +100,7 @@ public struct ImageRequest {
         self.size = size
         self.mode = mode
         self.processors = processors
+        self.caches = caches
         self.context = context
         if let isGif {
             self.isGif = isGif
@@ -111,6 +113,7 @@ public struct ImageRequest {
                 _ imageView: KKImageView,
                 key: String? = nil,
                 processors: RequestProcessor = .preDrawn,
+                caches: RequestCache = [.Memory, .Disk],
                 isGif: Bool? = nil,
                 context: Context = .default) {
         self.key = key ?? ImageRequest.cacheKeyFor(url)
@@ -122,6 +125,7 @@ public struct ImageRequest {
         self.mode = .fill
         #endif
         self.processors = processors
+        self.caches = caches
         self.context = context
         if let isGif {
             self.isGif = isGif
@@ -207,7 +211,7 @@ extension ImageRequest {
 }
 
 extension ImageRequest {
-    func send() async throws -> KKImage {
+    public func send() async throws -> KKImage {
         let res: ResultItem
         if let tmp = try await cachedImage() {
             res = .image(tmp)
