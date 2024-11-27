@@ -8,14 +8,16 @@
 import SwiftUI
 import Combine
 import RegexBuilder
+import Observation
 
+private let cache = NSCache<NSString, NSData>()
 private let threshold = 6
-final class ImagesFromHtml: ObservableObject, Equatable {
+@Observable final class ImagesFromHtml: ObservableObject, Equatable {
     static func == (lhs: ImagesFromHtml, rhs: ImagesFromHtml) -> Bool {
         lhs.state == rhs.state && lhs.items == rhs.items
     }
     
-    var state: State
+    @ObservationIgnored var state: State
     
     struct State: Identifiable, Codable, Hashable {
         public var id: String { url }
@@ -26,10 +28,10 @@ final class ImagesFromHtml: ObservableObject, Equatable {
         var pageSize: Int
     }
     
-    private var pageIndex: Int? = nil
-    @Published var items = [URL]()
-    private var isLoadingMoreData: Bool = false
-    var lastVisitableUrl: URL? = nil
+    @ObservationIgnored private var pageIndex: Int? = nil
+    var items = [URL]()
+    @ObservationIgnored private var isLoadingMoreData: Bool = false
+    @ObservationIgnored var lastVisitableUrl: URL? = nil
     
     enum Action {
         case fetch
@@ -110,8 +112,14 @@ private extension ImagesFromHtml {
         }
     }
     
-    func loadImages(url: URL) async throws {
-        let data = try Data(contentsOf: url)
+    private func imagesFrom(url: URL) throws -> [URL] {
+        let data: Data
+        if let old = cache.object(forKey: url.absoluteString as NSString) {
+            data = old as Data
+        } else {
+            data = try Data(contentsOf: url)
+            cache.setObject(data as NSData, forKey: url.absoluteString as NSString)
+        }
         var html = String(data: data, encoding: .utf8) ?? ""
         if html.isEmpty {
             html = String(data: data, encoding: .ascii) ?? ""
@@ -133,6 +141,11 @@ private extension ImagesFromHtml {
             }
         }
         
+        return images
+    }
+    
+    func loadImages(url: URL) async throws {
+        let images = try imagesFrom(url: url)
         if !images.isEmpty {
             let images = images
             await MainActor.run {

@@ -21,7 +21,7 @@ extension URL: Identifiable {
 }
 
 struct ContentView: View {
-    @ObservedObject var store: ImagesFromHtml
+    let store: ImagesFromHtml
     @State private var tapUrl: URL? = nil
     @State private var grayed: Bool = false
     var body: some View {
@@ -48,14 +48,14 @@ struct ContentView: View {
                             tapUrl = DiskCache().localPath(.init(url.absoluteString, size: .absolute(.zero)))
                         }
                     }
+                    if store.items.count < 0 {
+                        Text("Empty")
+                    }
                 }
             }
         }
         .quickLookPreview($tapUrl)
-        .onChange(of: store.state.id) { _ in
-            store.send(.fetch)
-        }
-        .onAppear {
+        .task(id: store.state.id) {
             store.send(.fetch)
         }
         .toolbar {

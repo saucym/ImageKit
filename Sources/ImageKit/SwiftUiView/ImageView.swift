@@ -64,6 +64,7 @@ public struct ImageView<Content>: View where Content : View {
             } else {
                 Text(loader.request.isGif == false ? "\((loader.request.url as NSString).lastPathComponent)" : "gif")
                     .frame(width: loader.request.size.width, height: loader.request.size.height ?? image.size.height / KKScreen.main.scale)
+                    .border(color: .green)
             }
             #else
             buildImageView(image)
@@ -87,6 +88,7 @@ public struct ImageView<Content>: View where Content : View {
             .clipped()
     }
     
+    #if os(iOS)
     @ViewBuilder func iOSImageView(_ image: KKImage) -> some View {
         if loader.request.isGif != false {
             GenericView<AutoResizeImageView> {
@@ -104,6 +106,7 @@ public struct ImageView<Content>: View where Content : View {
             buildImageView(image)
         }
     }
+    #endif
 }
 
 extension View {
