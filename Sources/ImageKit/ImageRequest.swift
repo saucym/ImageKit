@@ -62,7 +62,7 @@ public struct ImageRequest {
         public let processor: [ProcessorProtocol]
         public let loader: [LoaderProtocol]
         #if DEBUG
-        public var tag = 0
+        public var tag = 0 // 1: hidden image
         #endif
         public init(disk: DiskCache = .init(),
              useSubDir: Bool = true,

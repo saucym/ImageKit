@@ -121,12 +121,7 @@ extension View {
 
 private extension ImageRequest.Context {
     func isDisplay() -> Bool {
-        #if targetEnvironment(simulator)
-        #if DEBUG
         return tag != 1
-        #endif
-        #endif
-        return true
     }
 }
 
