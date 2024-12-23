@@ -10,7 +10,7 @@ import ImageIO
 
 public protocol DecoderProtocol {
     func isValid(request: ImageRequest) -> Bool
-    func decoder(request: ImageRequest, data: Data) async throws -> KKImage
+    func decoder(request: ImageRequest, data: Data) throws -> KKImage
 }
 
 #if os(iOS)
@@ -36,7 +36,7 @@ extension SystemDecoder: DecoderProtocol {
         return true
     }
     
-    public func decoder(request: ImageRequest, data: Data) async throws -> KKImage {
+    public func decoder(request: ImageRequest, data: Data) throws -> KKImage {
         if let source = CGImageSourceCreateWithData(data as CFData, nil) {
             #if os(iOS)
             let count = CGImageSourceGetCount(source)

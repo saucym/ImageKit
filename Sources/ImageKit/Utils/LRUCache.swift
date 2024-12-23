@@ -69,16 +69,16 @@ open class LRUCache<K: Hashable, V> {
     public let capacity: Int
     public var count = 0
     private let queue = LinkedList<K, V>()
-    private var hashtable: [K : Node<K, V>]
+    private var hashTable: [K : Node<K, V>]
 
     public init(capacity: Int) {
         self.capacity = capacity
-        self.hashtable = [K : Node<K, V>](minimumCapacity: capacity)
+        self.hashTable = [K : Node<K, V>](minimumCapacity: capacity)
     }
 
     public subscript (key: K) -> V? {
         get {
-            if let node = hashtable[key] {
+            if let node = hashTable[key] {
                 queue.remove(node: node)
                 queue.addToHead(node: node)
                 return node.value
@@ -88,13 +88,13 @@ open class LRUCache<K: Hashable, V> {
         }
 
         set(value) {
-            if let node = hashtable[key] {
+            if let node = hashTable[key] {
                 queue.remove(node: node)
                 if let value = value {
                     node.value = value
                     queue.addToHead(node: node)
                 } else {
-                    hashtable[key] = nil
+                    hashTable[key] = nil
                 }
             } else {
                 guard let value = value else { return }
@@ -102,17 +102,17 @@ open class LRUCache<K: Hashable, V> {
 
                 if count < capacity {
                     queue.addToHead(node: node)
-                    hashtable[key] = node
+                    hashTable[key] = node
 
                     count = count + 1
                 } else {
                     if let tail = queue.tail {
-                        hashtable.removeValue(forKey: tail.key)
+                        hashTable.removeValue(forKey: tail.key)
                         queue.remove(node: tail)
                     }
 
                     queue.addToHead(node: node)
-                    hashtable[key] = node
+                    hashTable[key] = node
                 }
             }
         }
@@ -122,7 +122,7 @@ open class LRUCache<K: Hashable, V> {
         queue.head = nil
         queue.tail = nil
         count = 0
-        hashtable.removeAll()
+        hashTable.removeAll()
     }
 }
 

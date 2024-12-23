@@ -8,6 +8,7 @@
 import Photos
 import SwiftUI
 import ImageIO
+import CryptoKit
 
 public struct RequestProcessor: OptionSet {
     public let rawValue: Int
@@ -53,29 +54,32 @@ public struct ImageRequest {
         }
     }
     
-    public class Context {
+    public actor Context {
         public static let `default` = Context()
-        public let disk: DiskCache
-        public let useSubDir: Bool
-        public let decoder: [DecoderProtocol]
-        public let cacher: [CacheProtocol]
-        public let processor: [ProcessorProtocol]
-        public let loader: [LoaderProtocol]
+        public nonisolated let disk: DiskCache
+        public nonisolated let useSubDir: Bool
+        public nonisolated let decoder: [DecoderProtocol]
+        public nonisolated let cacher: [CacheProtocol]
+        public nonisolated let processor: [ProcessorProtocol]
+        public nonisolated let loader: [LoaderProtocol]
         #if DEBUG
-        public var tag = 0 // 1: hidden image
+        let tag: Int // 1: hidden image
         #endif
+        var taskMap = [Int: Task<KKImage, Error>]()
         public init(disk: DiskCache = .init(),
              useSubDir: Bool = true,
              decoder: [DecoderProtocol] = [SystemDecoder()],
              cacher: [CacheProtocol] = [MemoryCache.shared],
              processor: [ProcessorProtocol] = [GrayProcessor(), PredrawnProcessor()],
-             loader: [LoaderProtocol] = [LocalLoader(), NetworkLoader()]) {
+                    loader: [LoaderProtocol] = [LocalLoader(), NetworkLoader()],
+                    tag: Int = 0) {
             self.disk = disk
             self.useSubDir = useSubDir
             self.decoder = decoder
             self.cacher = cacher
             self.processor = processor
             self.loader = loader
+            self.tag = tag
         }
     }
     
@@ -157,10 +161,10 @@ public struct ImageRequest {
 
 extension ImageRequest {
     // MARK: - Decoder
-    func decode(data: Data) async throws -> KKImage {
+    func decode(data: Data) throws -> KKImage {
         for operation in context.decoder {
             if operation.isValid(request: self) == true {
-                return try await operation.decoder(request: self, data: data)
+                return try operation.decoder(request: self, data: data)
             }
         }
         
@@ -213,26 +217,43 @@ extension ImageRequest {
     }
 }
 
-extension ImageRequest {
-    public func send() async throws -> KKImage {
-        let res: ResultItem
-        if let tmp = try await cachedImage() {
-            res = .image(tmp)
-        } else {
-            res = try await load()
+private extension ImageRequest.Context {
+    func load(request: ImageRequest) async throws -> KKImage {
+        if let cached = try await request.cachedImage() {
+            return cached
         }
         
-        switch res {
-        case .image(let image):
-            let result = process(image)
-            await cache(image: result)
-            return result
-        case .data(let data):
-            let image = try await decode(data: data)
-            let result = process(image)
-            await cache(image: result)
-            return result
+        let key = request.cacheKey()
+        let task: Task<KKImage, Error>
+        if let old = taskMap[key] {
+            task = old
+        } else {
+            task = Task {
+                let res = try await request.load()
+                switch res {
+                case .image(let image):
+                    let result = request.process(image)
+                    await request.cache(image: result)
+                    return result
+                case .data(let data):
+                    let image = try request.decode(data: data)
+                    let result = request.process(image)
+                    await request.cache(image: result)
+                    return result
+                }
+            }
+            taskMap[key] = task
         }
+        
+        let result = try await task.value
+        taskMap[key] = nil
+        return result
+    }
+}
+
+extension ImageRequest {
+    public func send() async throws -> KKImage {
+        return try await context.load(request: self)
     }
 }
 
@@ -258,4 +279,16 @@ public func logDebug(fileName: String = #file, funcName: String = #function, lin
     #if DEBUG
     print("[\((fileName as NSString).lastPathComponent):\(lineNum), \(funcName)]: \(text())")
     #endif
+}
+
+extension String {
+    var md5: String {
+        guard let data = data(using: .utf8) else {
+            return self
+        }
+//        let digest = SHA256.hash(data: data)
+//        let digest = Insecure.SHA1.hash(data: data)
+        let digest = Insecure.MD5.hash(data: data)
+        return digest.map { String(format: "%02x" , $0 ) }.joined()
+    }
 }

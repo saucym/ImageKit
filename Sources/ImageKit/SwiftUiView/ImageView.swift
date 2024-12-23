@@ -120,7 +120,7 @@ extension View {
 }
 
 private extension ImageRequest.Context {
-    func isDisplay() -> Bool {
+    nonisolated func isDisplay() -> Bool {
         return tag != 1
     }
 }
