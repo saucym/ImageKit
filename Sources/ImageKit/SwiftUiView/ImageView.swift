@@ -121,7 +121,11 @@ extension View {
 
 private extension ImageRequest.Context {
     nonisolated func isDisplay() -> Bool {
+        #if DEBUG
         return tag != 1
+        #else
+        return true
+        #endif
     }
 }
 

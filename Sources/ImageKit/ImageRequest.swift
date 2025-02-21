@@ -79,7 +79,9 @@ public struct ImageRequest {
             self.cacher = cacher
             self.processor = processor
             self.loader = loader
+            #if DEBUG
             self.tag = tag
+            #endif
         }
     }
     
