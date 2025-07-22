@@ -11,8 +11,8 @@
 		B30746D92CAA935400C7D35D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B30746D82CAA935400C7D35D /* Assets.xcassets */; };
 		B30746DD2CAA935400C7D35D /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B30746DC2CAA935400C7D35D /* Preview Assets.xcassets */; };
 		B30746E52CAA937A00C7D35D /* ImageKit in Frameworks */ = {isa = PBXBuildFile; productRef = B30746E42CAA937A00C7D35D /* ImageKit */; };
-		B30746E82CAA93CE00C7D35D /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30746E62CAA93CE00C7D35D /* ContentView.swift */; };
-		B30746E92CAA93CE00C7D35D /* ImagesFromHtml.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30746E72CAA93CE00C7D35D /* ImagesFromHtml.swift */; };
+		B3C504762E2F71AC00B88AE1 /* ImageKit in Frameworks */ = {isa = PBXBuildFile; productRef = B3C504752E2F71AC00B88AE1 /* ImageKit */; };
+		B3C504782E2F71AC00B88AE1 /* ImageKitExample in Frameworks */ = {isa = PBXBuildFile; productRef = B3C504772E2F71AC00B88AE1 /* ImageKitExample */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -21,8 +21,6 @@
 		B30746D82CAA935400C7D35D /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B30746DA2CAA935400C7D35D /* Example.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Example.entitlements; sourceTree = "<group>"; };
 		B30746DC2CAA935400C7D35D /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
-		B30746E62CAA93CE00C7D35D /* ContentView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		B30746E72CAA93CE00C7D35D /* ImagesFromHtml.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ImagesFromHtml.swift; sourceTree = "<group>"; };
 		B30746EA2CAA953F00C7D35D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -31,7 +29,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B3C504782E2F71AC00B88AE1 /* ImageKitExample in Frameworks */,
 				B30746E52CAA937A00C7D35D /* ImageKit in Frameworks */,
+				B3C504762E2F71AC00B88AE1 /* ImageKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -59,8 +59,6 @@
 			children = (
 				B30746EA2CAA953F00C7D35D /* Info.plist */,
 				B30746D42CAA935200C7D35D /* ExampleApp.swift */,
-				B30746E72CAA93CE00C7D35D /* ImagesFromHtml.swift */,
-				B30746E62CAA93CE00C7D35D /* ContentView.swift */,
 				B30746D82CAA935400C7D35D /* Assets.xcassets */,
 				B30746DA2CAA935400C7D35D /* Example.entitlements */,
 				B30746DB2CAA935400C7D35D /* Preview Content */,
@@ -94,6 +92,8 @@
 			name = Example;
 			packageProductDependencies = (
 				B30746E42CAA937A00C7D35D /* ImageKit */,
+				B3C504752E2F71AC00B88AE1 /* ImageKit */,
+				B3C504772E2F71AC00B88AE1 /* ImageKitExample */,
 			);
 			productName = Example;
 			productReference = B30746D12CAA935200C7D35D /* Example.app */;
@@ -124,7 +124,7 @@
 			);
 			mainGroup = B30746C82CAA935200C7D35D;
 			packageReferences = (
-				B30746E32CAA937A00C7D35D /* XCLocalSwiftPackageReference ".." */,
+				B3C504742E2F71AC00B88AE1 /* XCLocalSwiftPackageReference "../../ImageKit" */,
 			);
 			productRefGroup = B30746D22CAA935200C7D35D /* Products */;
 			projectDirPath = "";
@@ -152,9 +152,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B30746E82CAA93CE00C7D35D /* ContentView.swift in Sources */,
 				B30746D52CAA935200C7D35D /* ExampleApp.swift in Sources */,
-				B30746E92CAA93CE00C7D35D /* ImagesFromHtml.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -373,9 +371,9 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		B30746E32CAA937A00C7D35D /* XCLocalSwiftPackageReference ".." */ = {
+		B3C504742E2F71AC00B88AE1 /* XCLocalSwiftPackageReference "../../ImageKit" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ..;
+			relativePath = ../../ImageKit;
 		};
 /* End XCLocalSwiftPackageReference section */
 
@@ -383,6 +381,14 @@
 		B30746E42CAA937A00C7D35D /* ImageKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ImageKit;
+		};
+		B3C504752E2F71AC00B88AE1 /* ImageKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ImageKit;
+		};
+		B3C504772E2F71AC00B88AE1 /* ImageKitExample */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ImageKitExample;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

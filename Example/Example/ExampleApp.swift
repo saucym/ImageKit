@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import ImageKitExample
 
 @main
 struct ExampleApp: App {
@@ -13,7 +14,7 @@ struct ExampleApp: App {
     var body: some Scene {
         WindowGroup {
             let store: ImagesFromHtml = isGif ? .init(url: "http://www.sohu.com/a/216538730_170984") : .init(url: "http://www.fengniao.com/pe/pic_1.html", sep: "pic_")
-            ContentView(store: store)
+            ImageKitExampleView(store: store)
                 .toolbar {
                     Toggle(isOn: $isGif, label: {
                         Text("GIF")

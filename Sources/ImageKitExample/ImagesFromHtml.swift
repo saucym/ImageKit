@@ -12,14 +12,15 @@ import Observation
 
 private let cache = NSCache<NSString, NSData>()
 private let threshold = 6
-@Observable final class ImagesFromHtml: ObservableObject, Equatable {
-    static func == (lhs: ImagesFromHtml, rhs: ImagesFromHtml) -> Bool {
+@available(iOS 17.0, macOS 14.0, *)
+@Observable public final class ImagesFromHtml: ObservableObject, Equatable {
+    public static func == (lhs: ImagesFromHtml, rhs: ImagesFromHtml) -> Bool {
         lhs.state == rhs.state && lhs.items == rhs.items
     }
     
     @ObservationIgnored var state: State
     
-    struct State: Identifiable, Codable, Hashable {
+    public struct State: Identifiable, Codable, Hashable {
         public var id: String { url }
         var url: String
         var name: String
@@ -38,7 +39,7 @@ private let threshold = 6
         case loadMore
     }
     
-    convenience init(url: String,
+    public convenience init(url: String,
          name: String = "",
          sep: String = "",
          maxPage: Int = 10000,
@@ -46,7 +47,7 @@ private let threshold = 6
         self.init(state: .init(url: url, name: name, sep: sep, maxPage: maxPage, pageSize: pageSize))
     }
     
-    init(state: State) {
+    public init(state: State) {
         self.state = state
         let pageIndex: Int?
         if !state.sep.isEmpty {
@@ -75,6 +76,7 @@ private let threshold = 6
     }
 }
 
+@available(iOS 17.0, macOS 14.0, *)
 private extension ImagesFromHtml {
     func loadMoreData() {
         guard !isLoadingMoreData else { return }
@@ -163,10 +165,11 @@ private extension ImagesFromHtml {
     }
 }
 
+@available(iOS 17.0, macOS 14.0, *)
 extension ImagesFromHtml: RandomAccessCollection {
-    var startIndex: Int { items.startIndex }
-    var endIndex: Int { items.endIndex }
-    func formIndex(after i: inout Int) {
+    public var startIndex: Int { items.startIndex }
+    public var endIndex: Int { items.endIndex }
+    public func formIndex(after i: inout Int) {
         i += 1
         
         if i >= (items.count - threshold)
@@ -181,7 +184,7 @@ extension ImagesFromHtml: RandomAccessCollection {
         }
     }
     
-    subscript(position: Int) -> URL {
+    public subscript(position: Int) -> URL {
         items[position]
     }
 }

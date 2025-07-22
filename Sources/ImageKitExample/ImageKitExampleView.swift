@@ -1,5 +1,5 @@
 //
-//  ContentView.swift
+//  ImageKitExampleView.swift
 //  Example
 //
 //  Created by qhc_m@qq.com on 2024/1/13.
@@ -16,15 +16,19 @@ private let lineCount: CGFloat = 3
 private let lineCount: CGFloat = 4
 #endif
 
-extension URL: Identifiable {
+extension URL: @retroactive Identifiable {
     public var id: URL { self }
 }
 
-struct ContentView: View {
+@available(iOS 17.0, macOS 14.0, *)
+public struct ImageKitExampleView: View {
     let store: ImagesFromHtml
+    public init(store: ImagesFromHtml) {
+        self.store = store
+    }
     @State private var tapUrl: URL? = nil
     @State private var grayed: Bool = false
-    var body: some View {
+    public var body: some View {
         GeometryReader { reader in
             let cellWidth: CGFloat = (reader.size.width - lineCount + 1) / lineCount
             let columns = Array(repeating: GridItem(.flexible(minimum: cellWidth, maximum: cellWidth), spacing: space), count: Int(lineCount))
