@@ -159,6 +159,10 @@ public struct ImageRequest {
 
         return url.md5 + ".\(ext)"
     }
+    
+    public func localPath() -> URL {
+        context.disk.localPath(self)
+    }
 }
 
 extension ImageRequest {
