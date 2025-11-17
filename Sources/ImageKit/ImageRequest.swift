@@ -275,13 +275,13 @@ public enum IKError: Error {
     case decoderImageIsNil
 }
 
-public func logInfo(fileName: String = #file, funcName: String = #function, lineNum: Int = #line, _ items: Any..., separator: String = " ") {
+func logInfo(fileName: String = #file, funcName: String = #function, lineNum: Int = #line, _ items: Any..., separator: String = " ") {
     let stringItems = items.map{ String(describing: $0) }
     let combinedString = stringItems.joined(separator: separator)
     print("[\((fileName as NSString).lastPathComponent):\(lineNum), \(funcName)]: \(combinedString)")
 }
 
-public func logDebug(fileName: String = #file, funcName: String = #function, lineNum: Int = #line, _ text: @autoclosure () -> String) {
+func logDebug(fileName: String = #file, funcName: String = #function, lineNum: Int = #line, _ text: @autoclosure () -> String) {
     #if DEBUG
     print("[\((fileName as NSString).lastPathComponent):\(lineNum), \(funcName)]: \(text())")
     #endif
