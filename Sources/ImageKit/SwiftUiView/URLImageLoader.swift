@@ -18,19 +18,19 @@ public struct URLImageLoader: ImageLoader, Equatable {
         self.request = request
         do {
             if let image = try request.cachedImage() {
-                result.value = .image(image)
+                result.value = .success(image)
             }
         } catch {
-            result.value = .error
+            result.value = .failure(error)
         }
     }
     
     @MainActor public func loadImage() async {
         do {
             let image = try await request.send()
-            result.value = .image(image)
+            result.value = .success(image)
         } catch {
-            result.value = .error
+            result.value = .failure(error)
             logInfo(error.localizedDescription)
         }
     }

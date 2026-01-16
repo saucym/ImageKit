@@ -37,9 +37,7 @@ public struct ImageKitExampleView: View {
                 LazyVGrid(columns: columns, spacing: space) {
                     ForEach(store) { url in
                         let loader = URLImageLoader(.init(url.absoluteString, size: .absolute(imageSize), processors: grayed ? [.Gay, .preDrawn] : .preDrawn))
-                        ImageView(loader: loader) { isError in
-                            Text(isError ? "error" : "loading")
-                        }
+                        ImageView(loader: loader)
                         .overlay(alignment: .topTrailing) {
                             Text(url.pathExtension)
                                 .foregroundColor(.yellow)
