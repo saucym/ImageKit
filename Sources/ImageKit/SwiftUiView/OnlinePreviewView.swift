@@ -70,6 +70,25 @@ public struct OnlinePreviewView: View {
             .offset(y: offset)
             .scaleEffect(1 - (offset / 1000))
         }
+        .onChange(of: state.currentID) { old, new in
+            if let oldItem = state.items.first(where: { $0.id == old }) {
+                if case .video(let item, key: _) = oldItem {
+                    item.player.pause()
+                }
+            }
+            if let newItem = state.items.first(where: { $0.id == new }) {
+                if case .video(let item, key: _) = newItem {
+                    item.player.play()
+                }
+            }
+        }
+        .onDisappear {
+            if let newItem = state.items.first(where: { $0.id == state.currentID }) {
+                if case .video(let item, key: _) = newItem {
+                    item.player.pause()
+                }
+            }
+        }
         .presentationBackground(.clear)
         .simultaneousGesture(
             DragGesture()
@@ -136,8 +155,6 @@ private struct ZoomableImageCell: View {
                     case .video(let video, let key):
                         VideoPlayer(player: video.player)
                             .frame(width: proxy.size.width, height: proxy.size.height)
-                            .onAppear { video.player.play() }
-                            .onDisappear() { video.player.pause() }
                     }
                 }
                 .scaleEffect(totalScale)
@@ -165,5 +182,74 @@ private struct ZoomableImageCell: View {
         // 6. 关键：当缩放大于 1 时，允许 ScrollView 接管手势
         // 从而实现在放大状态下可以拖动查看图片边缘
         .scrollDisabled(totalScale <= 1.0)
+    }
+}
+
+@available(iOS 17.0, macOS 14.0, *)
+public struct OnlinePreviewVideoView: View {
+    public struct Source: Hashable, Identifiable {
+        public var id: URL { url }
+        let url: URL
+        let name: String
+        public init(url: URL, name: String) {
+            self.url = url
+            self.name = name
+        }
+    }
+    
+    let player: AVPlayer
+    let name: String
+    public init(source: Source) {
+        self.name = source.name
+        self.player = .init(url: source.url)
+    }
+    
+    @Environment(\.dismiss) private var dismiss
+    @State private var offset: CGFloat = 0
+    @State private var opacity: Double = 1.0
+    public var body: some View {
+        ZStack {
+            Color.black.opacity(opacity).ignoresSafeArea()
+            
+            VideoPlayer(player: player) {
+                VStack(alignment: .leading) {
+                    HStack {
+                        Spacer()
+                        Text(name).lineLimit(1)
+                        Spacer()
+                    }
+                    Spacer()
+                }
+            }
+            .offset(y: offset)
+            .scaleEffect(1 - (offset / 1000))
+        }
+        .onAppear {
+            player.play()
+        }
+        .onDisappear {
+            player.pause()
+        }
+        .presentationBackground(.clear)
+        .simultaneousGesture(
+            DragGesture()
+                .onChanged { value in
+                    if abs(value.translation.height) > abs(value.translation.width), value.translation.height > 0 {
+                        offset = value.translation.height
+                        opacity = Double(1 - (offset / 500))
+                    }
+                }
+                .onEnded { value in
+                    let dy = value.translation.height
+                    if dy > 150 {
+                        dismiss()
+                    } else {
+                        withAnimation(.spring()) {
+                            offset = 0
+                            opacity = 1.0
+                        }
+                    }
+                }
+        )
     }
 }
