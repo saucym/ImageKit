@@ -113,7 +113,7 @@ public struct OnlinePreviewView: View {
     }
 }
 
-extension URL: Identifiable {
+extension URL: @retroactive Identifiable {
     public var id: String { absoluteString }
 }
 
@@ -136,7 +136,7 @@ private struct ZoomableImageCell: View {
             ScrollView([.horizontal, .vertical], showsIndicators: false) {
                 Group {
                     switch item {
-                    case .file(let url, let key):
+                    case .file(let url, _):
                         AsyncImage(url: url) { phase in
                             if let image = phase.image {
                                 image
@@ -152,7 +152,7 @@ private struct ZoomableImageCell: View {
                             }
                         }
                         .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
-                    case .video(let video, let key):
+                    case .video(let video, _):
                         VideoPlayer(player: video.player)
                             .frame(width: proxy.size.width, height: proxy.size.height)
                     }
@@ -187,48 +187,208 @@ private struct ZoomableImageCell: View {
 
 @available(iOS 17.0, macOS 14.0, *)
 public struct OnlinePreviewVideoView: View {
-    public struct Source: Hashable, Identifiable {
+    public struct Source: Equatable, Identifiable {
         public var id: URL { url }
         let url: URL
         let name: String
-        public init(url: URL, name: String) {
+        let cover: URLImageLoader
+        public init(url: URL, name: String, cover: URLImageLoader) {
             self.url = url
             self.name = name
+            self.cover = cover
         }
     }
     
-    let player: AVPlayer
-    let name: String
+    @State private var player: AVPlayer?
+    @State private var playbackPosition: Double = 0
+    @State private var currentTime: Double = 0
+    @State private var duration: Double = 0
+    @State private var isPlaying: Bool = false
+    @State private var isSeeking: Bool = false
+    @State private var showControls: Bool = true
+    @State private var hideControlsTask: DispatchWorkItem?
+
+    let source: Source
     public init(source: Source) {
-        self.name = source.name
-        self.player = .init(url: source.url)
+        self.source = source
     }
     
     @Environment(\.dismiss) private var dismiss
     @State private var offset: CGFloat = 0
     @State private var opacity: Double = 1.0
+
+    private let ticker = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
+
     public var body: some View {
         ZStack {
             Color.black.opacity(opacity).ignoresSafeArea()
-            
-            VideoPlayer(player: player) {
-                VStack(alignment: .leading) {
-                    HStack {
-                        Spacer()
-                        Text(name).lineLimit(1)
-                        Spacer()
-                    }
-                    Spacer()
+
+            Group {
+                if let player {
+                    VideoPlayer(player: player)
+                        .allowsHitTesting(false) // 禁用点击，原生控制栏就不会因为点击而弹出
+                } else {
+                    ImageView(loader: source.cover)
                 }
             }
             .offset(y: offset)
             .scaleEffect(1 - (offset / 1000))
+
+            if player != nil {
+                GeometryReader { proxy in
+                    HStack(spacing: 0) {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture(count: 2) {
+                                seek(by: -15)
+                            }
+
+                        Color.clear
+                            .contentShape(Rectangle())
+
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture(count: 2) {
+                                seek(by: 15)
+                            }
+                    }
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showControls.toggle()
+                        }
+                        if showControls {
+                            scheduleControlsAutoHide()
+                        }
+                    }
+                }
+                .ignoresSafeArea()
+            }
+
+            if player == nil {
+                Button {
+                    startPlayback()
+                } label: {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 68, weight: .regular))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.white)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 24)
+            }
+
+            if player != nil, showControls {
+                VStack {
+                    HStack {
+                        Spacer(minLength: 0)
+                        Text(source.name)
+                            .font(.headline)
+                            .lineLimit(1)
+                            .foregroundStyle(.white)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 20)
+
+                    Spacer()
+
+                    VStack(spacing: 10) {
+                        HStack(spacing: 16) {
+                            Slider(
+                                value: Binding(
+                                    get: { duration > 0 ? currentTime : 0 },
+                                    set: { newValue in
+                                        currentTime = newValue
+                                    }
+                                ),
+                                in: 0...max(duration, 0.1),
+                                onEditingChanged: { editing in
+                                    isSeeking = editing
+                                    if !editing, let player {
+                                        let target = CMTime(seconds: currentTime, preferredTimescale: 600)
+                                        player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
+                                        scheduleControlsAutoHide()
+                                    }
+                                }
+                            )
+                            .tint(.white)
+                        }
+
+                        HStack {
+                            Text(formatTime(currentTime))
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.white.opacity(0.9))
+                            Spacer()
+                            Text(formatTime(duration))
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.white.opacity(0.9))
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 14)
+                    .background(
+                        LinearGradient(
+                            colors: [Color.black.opacity(0.0), Color.black.opacity(0.2)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                }
+                .transition(.opacity)
+                
+                HStack(spacing: 28) {
+                    Button {
+                        seek(by: -15)
+                    } label: {
+                        Image(systemName: "gobackward.15")
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 52, height: 52)
+                            .background(.black.opacity(0.35), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        pauseAndRelease()
+                    } label: {
+                        Image(systemName: "pause.fill")
+                            .font(.system(size: 28, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 64, height: 64)
+                            .background(.black.opacity(0.42), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        seek(by: 15)
+                    } label: {
+                        Image(systemName: "goforward.15")
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 52, height: 52)
+                            .background(.black.opacity(0.35), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .transition(.opacity)
+            }
         }
-        .onAppear {
-            player.play()
+        .onReceive(ticker) { _ in
+            guard let player, !isSeeking else { return }
+            let now = player.currentTime().seconds
+            if now.isFinite {
+                currentTime = now
+            }
+
+            let total = player.currentItem?.duration.seconds ?? 0
+            if total.isFinite && total > 0 {
+                duration = total
+            }
         }
         .onDisappear {
-            player.pause()
+            pauseAndRelease()
         }
         .presentationBackground(.clear)
         .simultaneousGesture(
@@ -242,6 +402,7 @@ public struct OnlinePreviewVideoView: View {
                 .onEnded { value in
                     let dy = value.translation.height
                     if dy > 150 {
+                        pauseAndRelease()
                         dismiss()
                     } else {
                         withAnimation(.spring()) {
@@ -251,5 +412,72 @@ public struct OnlinePreviewVideoView: View {
                     }
                 }
         )
+    }
+
+    private func startPlayback() {
+        let player = AVPlayer(url: source.url)
+        if playbackPosition > 0 {
+            let startTime = CMTime(seconds: playbackPosition, preferredTimescale: 600)
+            player.seek(to: startTime, toleranceBefore: .zero, toleranceAfter: .zero)
+        }
+        self.player = player
+        self.duration = player.currentItem?.duration.seconds.isFinite == true ? player.currentItem?.duration.seconds ?? 0 : 0
+        self.currentTime = playbackPosition
+        self.isPlaying = true
+        self.showControls = true
+        player.play()
+        scheduleControlsAutoHide()
+    }
+
+    private func pauseAndRelease() {
+        hideControlsTask?.cancel()
+        hideControlsTask = nil
+
+        guard let player else { return }
+        let current = player.currentTime().seconds
+        if current.isFinite, current >= 0 {
+            playbackPosition = current
+            currentTime = current
+        }
+        let total = player.currentItem?.duration.seconds ?? 0
+        if total.isFinite, total > 0 {
+            duration = total
+        }
+
+        player.pause()
+        self.player = nil
+        self.isPlaying = false
+        self.showControls = true
+    }
+
+    private func scheduleControlsAutoHide() {
+        hideControlsTask?.cancel()
+        guard isPlaying else { return }
+        let task = DispatchWorkItem {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                showControls = false
+            }
+        }
+        hideControlsTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: task)
+    }
+
+    private func seek(by delta: Double) {
+        guard let player else { return }
+        let totalDuration = player.currentItem?.duration.seconds ?? duration
+        let maxTime = totalDuration.isFinite && totalDuration > 0 ? totalDuration : currentTime + max(delta, 0)
+        let targetSeconds = min(max(currentTime + delta, 0), maxTime)
+        let target = CMTime(seconds: targetSeconds, preferredTimescale: 600)
+        currentTime = targetSeconds
+        player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
+        scheduleControlsAutoHide()
+    }
+
+    private func formatTime(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds >= 0 else { return "00:00" }
+        let total = Int(seconds.rounded(.down))
+        let m = total / 60
+        let s = total % 60
+        return String(format: "%02d:%02d", m, s)
     }
 }
