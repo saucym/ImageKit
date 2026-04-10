@@ -212,6 +212,9 @@ public struct OnlinePreviewVideoView: View {
     @State private var twoFingerSeekAnchorTime: Double = 0
     @State private var showControls: Bool = true
     @State private var hideControlsTask: DispatchWorkItem?
+    @State private var pendingSeekTask: DispatchWorkItem?
+    @State private var pendingSeekTime: Double?
+    @State private var lastContinuousSeekAt: TimeInterval = 0
 
     let source: Source
     public init(source: Source) {
@@ -223,6 +226,7 @@ public struct OnlinePreviewVideoView: View {
     @State private var opacity: Double = 1.0
 
     private let ticker = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
+    private let continuousSeekInterval: TimeInterval = 0.08
 
     public var body: some View {
         ZStack {
@@ -323,7 +327,7 @@ public struct OnlinePreviewVideoView: View {
                                         let target = clampedTime(newValue)
                                         currentTime = target
                                         if isSeeking {
-                                            seekPlayer(to: target)
+                                            seekPlayer(to: target, throttled: true)
                                         }
                                     }
                                 ),
@@ -472,6 +476,9 @@ public struct OnlinePreviewVideoView: View {
     private func pauseAndRelease() {
         hideControlsTask?.cancel()
         hideControlsTask = nil
+        pendingSeekTask?.cancel()
+        pendingSeekTask = nil
+        pendingSeekTime = nil
         isTwoFingerSeeking = false
 
         guard let player else { return }
@@ -522,7 +529,7 @@ public struct OnlinePreviewVideoView: View {
         let validWidth = max(width, 1)
         let target = clampedTime(twoFingerSeekAnchorTime + duration * Double(translationX / validWidth))
         currentTime = target
-        seekPlayer(to: target)
+        seekPlayer(to: target, throttled: true)
     }
 
     private func endTwoFingerSeek() {
@@ -545,7 +552,42 @@ public struct OnlinePreviewVideoView: View {
         scheduleControlsAutoHide()
     }
 
-    private func seekPlayer(to seconds: Double) {
+    private func seekPlayer(to seconds: Double, throttled: Bool = false) {
+        guard throttled else {
+            pendingSeekTask?.cancel()
+            pendingSeekTask = nil
+            pendingSeekTime = nil
+            performSeek(to: seconds)
+            lastContinuousSeekAt = Date().timeIntervalSinceReferenceDate
+            return
+        }
+
+        pendingSeekTime = seconds
+        let now = Date().timeIntervalSinceReferenceDate
+        let elapsed = now - lastContinuousSeekAt
+
+        if elapsed >= continuousSeekInterval {
+            pendingSeekTask?.cancel()
+            pendingSeekTask = nil
+            pendingSeekTime = nil
+            performSeek(to: seconds)
+            lastContinuousSeekAt = now
+            return
+        }
+
+        pendingSeekTask?.cancel()
+        let task = DispatchWorkItem {
+            let target = pendingSeekTime ?? seconds
+            pendingSeekTask = nil
+            pendingSeekTime = nil
+            performSeek(to: target)
+            lastContinuousSeekAt = Date().timeIntervalSinceReferenceDate
+        }
+        pendingSeekTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(continuousSeekInterval - elapsed, 0.01), execute: task)
+    }
+
+    private func performSeek(to seconds: Double) {
         guard let player else { return }
         let target = CMTime(seconds: seconds, preferredTimescale: 600)
         player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
