@@ -7,6 +7,9 @@
 
 import SwiftUI
 import AVKit
+#if os(iOS)
+import UIKit
+#endif
 
 @available(iOS 17.0, macOS 14.0, *)
 public struct OnlinePreviewView: View {
@@ -205,6 +208,8 @@ public struct OnlinePreviewVideoView: View {
     @State private var duration: Double = 0
     @State private var isPlaying: Bool = false
     @State private var isSeeking: Bool = false
+    @State private var isTwoFingerSeeking: Bool = false
+    @State private var twoFingerSeekAnchorTime: Double = 0
     @State private var showControls: Bool = true
     @State private var hideControlsTask: DispatchWorkItem?
 
@@ -236,21 +241,36 @@ public struct OnlinePreviewVideoView: View {
 
             if player != nil {
                 GeometryReader { proxy in
-                    HStack(spacing: 0) {
-                        Color.clear
-                            .contentShape(Rectangle())
-                            .onTapGesture(count: 2) {
-                                seek(by: -15)
-                            }
+                    ZStack {
+                        HStack(spacing: 0) {
+                            Color.clear
+                                .contentShape(Rectangle())
+                                .onTapGesture(count: 2) {
+                                    seek(by: -15)
+                                }
 
-                        Color.clear
-                            .contentShape(Rectangle())
+                            Color.clear
+                                .contentShape(Rectangle())
 
-                        Color.clear
-                            .contentShape(Rectangle())
-                            .onTapGesture(count: 2) {
-                                seek(by: 15)
+                            Color.clear
+                                .contentShape(Rectangle())
+                                .onTapGesture(count: 2) {
+                                    seek(by: 15)
+                                }
+                        }
+
+                        TwoFingerSeekOverlay(
+                            isEnabled: player != nil,
+                            onStart: {
+                                beginTwoFingerSeek()
+                            },
+                            onChange: { translationX, width in
+                                updateTwoFingerSeek(translationX: translationX, width: width)
+                            },
+                            onEnd: {
+                                endTwoFingerSeek()
                             }
+                        )
                     }
                     .frame(width: proxy.size.width, height: proxy.size.height)
                     .contentShape(Rectangle())
@@ -300,15 +320,18 @@ public struct OnlinePreviewVideoView: View {
                                 value: Binding(
                                     get: { duration > 0 ? currentTime : 0 },
                                     set: { newValue in
-                                        currentTime = newValue
+                                        let target = clampedTime(newValue)
+                                        currentTime = target
+                                        if isSeeking {
+                                            seekPlayer(to: target)
+                                        }
                                     }
                                 ),
                                 in: 0...max(duration, 0.1),
                                 onEditingChanged: { editing in
                                     isSeeking = editing
-                                    if !editing, let player {
-                                        let target = CMTime(seconds: currentTime, preferredTimescale: 600)
-                                        player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
+                                    if !editing {
+                                        seekPlayer(to: currentTime)
                                         scheduleControlsAutoHide()
                                     }
                                 }
@@ -374,6 +397,23 @@ public struct OnlinePreviewVideoView: View {
                 }
                 .transition(.opacity)
             }
+
+            if player != nil, isTwoFingerSeeking {
+                VStack {
+                    Spacer()
+                    GeometryReader { proxy in
+                        ZStack(alignment: .leading) {
+                            Color.white.opacity(0.18)
+                            Color.white
+                                .frame(width: max(proxy.size.width * progressFraction, 0))
+                        }
+                        .frame(height: 1)
+                        .frame(maxHeight: .infinity, alignment: .bottom)
+                    }
+                    .frame(height: 1)
+                }
+                .ignoresSafeArea(edges: .bottom)
+            }
         }
         .onReceive(ticker) { _ in
             guard let player, !isSeeking else { return }
@@ -432,6 +472,7 @@ public struct OnlinePreviewVideoView: View {
     private func pauseAndRelease() {
         hideControlsTask?.cancel()
         hideControlsTask = nil
+        isTwoFingerSeeking = false
 
         guard let player else { return }
         let current = player.currentTime().seconds
@@ -462,15 +503,58 @@ public struct OnlinePreviewVideoView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: task)
     }
 
-    private func seek(by delta: Double) {
-        guard let player else { return }
-        let totalDuration = player.currentItem?.duration.seconds ?? duration
-        let maxTime = totalDuration.isFinite && totalDuration > 0 ? totalDuration : currentTime + max(delta, 0)
-        let targetSeconds = min(max(currentTime + delta, 0), maxTime)
-        let target = CMTime(seconds: targetSeconds, preferredTimescale: 600)
-        currentTime = targetSeconds
-        player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
+    private var progressFraction: CGFloat {
+        guard duration.isFinite, duration > 0 else { return 0 }
+        return CGFloat(min(max(currentTime / duration, 0), 1))
+    }
+
+    private func beginTwoFingerSeek() {
+        guard player != nil else { return }
+        hideControlsTask?.cancel()
+        hideControlsTask = nil
+        isSeeking = true
+        isTwoFingerSeeking = true
+        twoFingerSeekAnchorTime = currentTime
+    }
+
+    private func updateTwoFingerSeek(translationX: CGFloat, width: CGFloat) {
+        guard player != nil else { return }
+        let validWidth = max(width, 1)
+        let target = clampedTime(twoFingerSeekAnchorTime + duration * Double(translationX / validWidth))
+        currentTime = target
+        seekPlayer(to: target)
+    }
+
+    private func endTwoFingerSeek() {
+        guard player != nil else {
+            isSeeking = false
+            isTwoFingerSeeking = false
+            return
+        }
+        seekPlayer(to: currentTime)
+        isSeeking = false
+        isTwoFingerSeeking = false
         scheduleControlsAutoHide()
+    }
+
+    private func seek(by delta: Double) {
+        guard player != nil else { return }
+        let targetSeconds = clampedTime(currentTime + delta)
+        currentTime = targetSeconds
+        seekPlayer(to: targetSeconds)
+        scheduleControlsAutoHide()
+    }
+
+    private func seekPlayer(to seconds: Double) {
+        guard let player else { return }
+        let target = CMTime(seconds: seconds, preferredTimescale: 600)
+        player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
+    private func clampedTime(_ seconds: Double) -> Double {
+        let totalDuration = player?.currentItem?.duration.seconds ?? duration
+        let upperBound = totalDuration.isFinite && totalDuration > 0 ? totalDuration : max(seconds, 0)
+        return min(max(seconds, 0), upperBound)
     }
 
     private func formatTime(_ seconds: Double) -> String {
@@ -481,3 +565,81 @@ public struct OnlinePreviewVideoView: View {
         return String(format: "%02d:%02d", m, s)
     }
 }
+
+#if os(iOS)
+@available(iOS 17.0, macOS 14.0, *)
+private struct TwoFingerSeekOverlay: UIViewRepresentable {
+    let isEnabled: Bool
+    let onStart: () -> Void
+    let onChange: (_ translationX: CGFloat, _ width: CGFloat) -> Void
+    let onEnd: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onStart: onStart, onChange: onChange, onEnd: onEnd)
+    }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+
+        let recognizer = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
+        recognizer.minimumNumberOfTouches = 2
+        recognizer.maximumNumberOfTouches = 2
+        recognizer.cancelsTouchesInView = false
+        context.coordinator.recognizer = recognizer
+        view.addGestureRecognizer(recognizer)
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        context.coordinator.onStart = onStart
+        context.coordinator.onChange = onChange
+        context.coordinator.onEnd = onEnd
+        context.coordinator.recognizer?.isEnabled = isEnabled
+    }
+
+    final class Coordinator: NSObject {
+        var onStart: () -> Void
+        var onChange: (_ translationX: CGFloat, _ width: CGFloat) -> Void
+        var onEnd: () -> Void
+        weak var recognizer: UIPanGestureRecognizer?
+
+        init(
+            onStart: @escaping () -> Void,
+            onChange: @escaping (_ translationX: CGFloat, _ width: CGFloat) -> Void,
+            onEnd: @escaping () -> Void
+        ) {
+            self.onStart = onStart
+            self.onChange = onChange
+            self.onEnd = onEnd
+        }
+
+        @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
+            guard let view = recognizer.view else { return }
+            switch recognizer.state {
+            case .began:
+                onStart()
+                onChange(recognizer.translation(in: view).x, view.bounds.width)
+            case .changed:
+                onChange(recognizer.translation(in: view).x, view.bounds.width)
+            case .ended, .cancelled, .failed:
+                onEnd()
+            default:
+                break
+            }
+        }
+    }
+}
+#else
+@available(iOS 17.0, macOS 14.0, *)
+private struct TwoFingerSeekOverlay: View {
+    let isEnabled: Bool
+    let onStart: () -> Void
+    let onChange: (_ translationX: CGFloat, _ width: CGFloat) -> Void
+    let onEnd: () -> Void
+
+    var body: some View {
+        Color.clear.allowsHitTesting(false)
+    }
+}
+#endif
