@@ -149,7 +149,7 @@ private struct ZoomableImageCell: View {
             ScrollView([.horizontal, .vertical], showsIndicators: false) {
                 Group {
                     switch item {
-                    case .file(let url, let key):
+                    case .file:
                         if let loader {
                             ImageView(loader: loader)
                         }
@@ -203,15 +203,13 @@ public struct OnlinePreviewVideoView: View {
         public var id: URL { url }
         let url: URL
         let name: String
-        let cover: URLImageLoader
-        public init(url: URL, name: String, cover: URLImageLoader) {
+        public init(url: URL, name: String) {
             self.url = url
             self.name = name
-            self.cover = cover
         }
     }
     
-    @State private var player: AVPlayer?
+    private let player: AVPlayer
     @State private var playbackPosition: Double = 0
     @State private var currentTime: Double = 0
     @State private var duration: Double = 0
@@ -224,194 +222,67 @@ public struct OnlinePreviewVideoView: View {
     @State private var pendingSeekTask: DispatchWorkItem?
     @State private var pendingSeekTime: Double?
     @State private var lastContinuousSeekAt: TimeInterval = 0
-
+    
     let source: Source
     public init(source: Source) {
         self.source = source
+        player = AVPlayer(url: source.url)
     }
     
     @Environment(\.dismiss) private var dismiss
     @State private var offset: CGFloat = 0
     @State private var opacity: Double = 1.0
-
+    
     private let ticker = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
     private let continuousSeekInterval: TimeInterval = 0.08
-
+    
     public var body: some View {
         ZStack {
             Color.black.opacity(opacity).ignoresSafeArea()
-
-            Group {
-                if let player {
-                    VideoPlayer(player: player)
-                        .allowsHitTesting(false) // 禁用点击，原生控制栏就不会因为点击而弹出
-                } else {
-                    ImageView(loader: source.cover)
-                }
-            }
-            .offset(y: offset)
-            .scaleEffect(1 - (offset / 1000))
-
-            if player != nil {
-                GeometryReader { proxy in
-                    ZStack {
-                        HStack(spacing: 0) {
-                            Color.clear
-                                .contentShape(Rectangle())
-                                .onTapGesture(count: 2) {
-                                    seek(by: -15)
-                                }
-
-                            Color.clear
-                                .contentShape(Rectangle())
-
-                            Color.clear
-                                .contentShape(Rectangle())
-                                .onTapGesture(count: 2) {
-                                    seek(by: 15)
-                                }
+            
+            VideoPlayer(player: player)
+                .allowsHitTesting(false) // 禁用点击，原生控制栏就不会因为点击而弹出
+                .offset(y: offset)
+                .scaleEffect(1 - (offset / 1000))
+            
+            GeometryReader { proxy in
+                ZStack {
+                    Color.clear
+                        .contentShape(Rectangle())
+                    
+                    TwoFingerSeekOverlay(
+                        isEnabled: true,
+                        isDoubleTapEnabled: !showControls,
+                        onSingleTap: {
+                            toggleControls()
+                        },
+                        onLeftDoubleTap: {
+                            seek(by: -15)
+                        },
+                        onRightDoubleTap: {
+                            seek(by: 15)
+                        },
+                        onStart: {
+                            beginTwoFingerSeek()
+                        },
+                        onChange: { translationX, width in
+                            updateTwoFingerSeek(translationX: translationX, width: width)
+                        },
+                        onEnd: {
+                            endTwoFingerSeek()
                         }
-
-                        TwoFingerSeekOverlay(
-                            isEnabled: player != nil,
-                            onStart: {
-                                beginTwoFingerSeek()
-                            },
-                            onChange: { translationX, width in
-                                updateTwoFingerSeek(translationX: translationX, width: width)
-                            },
-                            onEnd: {
-                                endTwoFingerSeek()
-                            }
-                        )
-                    }
-                    .frame(width: proxy.size.width, height: proxy.size.height)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            showControls.toggle()
-                        }
-                        if showControls {
-                            scheduleControlsAutoHide()
-                        }
-                    }
-                }
-                .ignoresSafeArea()
-            }
-
-            if player == nil {
-                Button {
-                    startPlayback()
-                } label: {
-                    Image(systemName: "play.circle.fill")
-                        .font(.system(size: 68, weight: .regular))
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(.white)
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 24)
-            }
-
-            if player != nil, showControls {
-                VStack {
-                    HStack {
-                        Spacer(minLength: 0)
-                        Text(source.name)
-                            .font(.headline)
-                            .lineLimit(1)
-                            .foregroundStyle(.white)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 20)
-
-                    Spacer()
-
-                    VStack(spacing: 10) {
-                        HStack(spacing: 16) {
-                            Slider(
-                                value: Binding(
-                                    get: { duration > 0 ? currentTime : 0 },
-                                    set: { newValue in
-                                        let target = clampedTime(newValue)
-                                        currentTime = target
-                                        if isSeeking {
-                                            seekPlayer(to: target, throttled: true)
-                                        }
-                                    }
-                                ),
-                                in: 0...max(duration, 0.1),
-                                onEditingChanged: { editing in
-                                    isSeeking = editing
-                                    if !editing {
-                                        seekPlayer(to: currentTime)
-                                        scheduleControlsAutoHide()
-                                    }
-                                }
-                            )
-                            .tint(.white)
-                        }
-
-                        HStack {
-                            Text(formatTime(currentTime))
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.white.opacity(0.9))
-                            Spacer()
-                            Text(formatTime(duration))
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.white.opacity(0.9))
-                        }
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 14)
-                    .background(
-                        LinearGradient(
-                            colors: [Color.black.opacity(0.0), Color.black.opacity(0.2)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
                     )
                 }
-                .transition(.opacity)
-                
-                HStack(spacing: 28) {
-                    Button {
-                        seek(by: -15)
-                    } label: {
-                        Image(systemName: "gobackward.15")
-                            .font(.system(size: 24, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 52, height: 52)
-                            .background(.black.opacity(0.35), in: Circle())
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        pauseAndRelease()
-                    } label: {
-                        Image(systemName: "pause.fill")
-                            .font(.system(size: 28, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 64, height: 64)
-                            .background(.black.opacity(0.42), in: Circle())
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        seek(by: 15)
-                    } label: {
-                        Image(systemName: "goforward.15")
-                            .font(.system(size: 24, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 52, height: 52)
-                            .background(.black.opacity(0.35), in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                }
-                .transition(.opacity)
+                .frame(width: proxy.size.width, height: proxy.size.height)
+                .contentShape(Rectangle())
             }
-
-            if player != nil, isTwoFingerSeeking {
+            .ignoresSafeArea()
+            
+            if showControls {
+                controllerView
+            }
+            
+            if isTwoFingerSeeking {
                 VStack {
                     Spacer()
                     GeometryReader { proxy in
@@ -429,19 +300,22 @@ public struct OnlinePreviewVideoView: View {
             }
         }
         .onReceive(ticker) { _ in
-            guard let player, !isSeeking else { return }
+            guard !isSeeking else { return }
             let now = player.currentTime().seconds
             if now.isFinite {
                 currentTime = now
             }
-
+            
             let total = player.currentItem?.duration.seconds ?? 0
             if total.isFinite && total > 0 {
                 duration = total
             }
         }
+        .onAppear {
+            startPlayback()
+        }
         .onDisappear {
-            pauseAndRelease()
+            pausePlayback(keepControlsVisible: true)
         }
         .presentationBackground(.clear)
         .simultaneousGesture(
@@ -455,7 +329,7 @@ public struct OnlinePreviewVideoView: View {
                 .onEnded { value in
                     let dy = value.translation.height
                     if dy > 150 {
-                        pauseAndRelease()
+                        pausePlayback(keepControlsVisible: true)
                         dismiss()
                     } else {
                         withAnimation(.spring()) {
@@ -466,31 +340,138 @@ public struct OnlinePreviewVideoView: View {
                 }
         )
     }
-
+    
+    @ViewBuilder private var controllerView: some View {
+        VStack {
+            HStack {
+                Spacer(minLength: 0)
+                Text(source.name)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .foregroundStyle(.white)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+            
+            Spacer()
+            
+            VStack(spacing: 10) {
+                HStack(spacing: 16) {
+                    Slider(
+                        value: Binding(
+                            get: { duration > 0 ? currentTime : 0 },
+                            set: { newValue in
+                                let target = clampedTime(newValue)
+                                currentTime = target
+                                if isSeeking {
+                                    seekPlayer(to: target, throttled: true)
+                                }
+                            }
+                        ),
+                        in: 0...max(duration, 0.1),
+                        onEditingChanged: { editing in
+                            isSeeking = editing
+                            if !editing {
+                                seekPlayer(to: currentTime)
+                                scheduleControlsAutoHide()
+                            }
+                        }
+                    )
+                    .tint(.white)
+                }
+                
+                HStack {
+                    Text(formatTime(currentTime))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.9))
+                    Spacer()
+                    Text(formatTime(duration))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.9))
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            .background(
+                LinearGradient(
+                    colors: [Color.black.opacity(0.0), Color.black.opacity(0.2)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+        }
+        .transition(.opacity)
+        
+        HStack(spacing: 28) {
+            Button {
+                seek(by: -15)
+            } label: {
+                Image(systemName: "gobackward.15")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 52, height: 52)
+                    .background(.black.opacity(0.35), in: Circle())
+            }
+            .buttonStyle(.plain)
+            
+            Button {
+                togglePlayback()
+            } label: {
+                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 64, height: 64)
+                    .background(.black.opacity(0.42), in: Circle())
+            }
+            .buttonStyle(.plain)
+            
+            Button {
+                seek(by: 15)
+            } label: {
+                Image(systemName: "goforward.15")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 52, height: 52)
+                    .background(.black.opacity(0.35), in: Circle())
+            }
+            .buttonStyle(.plain)
+        }
+        .transition(.opacity)
+    }
+    
     private func startPlayback() {
-        let player = AVPlayer(url: source.url)
+        let current = player.currentTime().seconds
+        let targetTime: Double
         if playbackPosition > 0 {
-            let startTime = CMTime(seconds: playbackPosition, preferredTimescale: 600)
+            targetTime = playbackPosition
+        } else if current.isFinite, current >= 0 {
+            targetTime = current
+        } else {
+            targetTime = 0
+        }
+        
+        if abs(current - targetTime) > 0.25 {
+            let startTime = CMTime(seconds: targetTime, preferredTimescale: 600)
             player.seek(to: startTime, toleranceBefore: .zero, toleranceAfter: .zero)
         }
-        self.player = player
+        
         self.duration = player.currentItem?.duration.seconds.isFinite == true ? player.currentItem?.duration.seconds ?? 0 : 0
-        self.currentTime = playbackPosition
+        self.currentTime = targetTime
         self.isPlaying = true
         self.showControls = true
         player.play()
         scheduleControlsAutoHide()
     }
-
-    private func pauseAndRelease() {
+    
+    private func pausePlayback(keepControlsVisible: Bool) {
         hideControlsTask?.cancel()
         hideControlsTask = nil
         pendingSeekTask?.cancel()
         pendingSeekTask = nil
         pendingSeekTime = nil
         isTwoFingerSeeking = false
-
-        guard let player else { return }
+        
         let current = player.currentTime().seconds
         if current.isFinite, current >= 0 {
             playbackPosition = current
@@ -500,13 +481,34 @@ public struct OnlinePreviewVideoView: View {
         if total.isFinite, total > 0 {
             duration = total
         }
-
+        
         player.pause()
-        self.player = nil
         self.isPlaying = false
-        self.showControls = true
+        self.showControls = keepControlsVisible
     }
-
+    
+    private func togglePlayback() {
+        if isPlaying {
+            pausePlayback(keepControlsVisible: true)
+        } else {
+            startPlayback()
+        }
+    }
+    
+    private func toggleControls() {
+        let shouldShow = !showControls
+        withAnimation(.easeInOut(duration: 0.2)) {
+            showControls = shouldShow
+        }
+        
+        if shouldShow {
+            scheduleControlsAutoHide()
+        } else {
+            hideControlsTask?.cancel()
+            hideControlsTask = nil
+        }
+    }
+    
     private func scheduleControlsAutoHide() {
         hideControlsTask?.cancel()
         guard isPlaying else { return }
@@ -518,49 +520,41 @@ public struct OnlinePreviewVideoView: View {
         hideControlsTask = task
         DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: task)
     }
-
+    
     private var progressFraction: CGFloat {
         guard duration.isFinite, duration > 0 else { return 0 }
         return CGFloat(min(max(currentTime / duration, 0), 1))
     }
-
+    
     private func beginTwoFingerSeek() {
-        guard player != nil else { return }
         hideControlsTask?.cancel()
         hideControlsTask = nil
         isSeeking = true
         isTwoFingerSeeking = true
         twoFingerSeekAnchorTime = currentTime
     }
-
+    
     private func updateTwoFingerSeek(translationX: CGFloat, width: CGFloat) {
-        guard player != nil else { return }
         let validWidth = max(width, 1)
         let target = clampedTime(twoFingerSeekAnchorTime + duration * Double(translationX / validWidth))
         currentTime = target
         seekPlayer(to: target, throttled: true)
     }
-
+    
     private func endTwoFingerSeek() {
-        guard player != nil else {
-            isSeeking = false
-            isTwoFingerSeeking = false
-            return
-        }
         seekPlayer(to: currentTime)
         isSeeking = false
         isTwoFingerSeeking = false
         scheduleControlsAutoHide()
     }
-
+    
     private func seek(by delta: Double) {
-        guard player != nil else { return }
         let targetSeconds = clampedTime(currentTime + delta)
         currentTime = targetSeconds
         seekPlayer(to: targetSeconds)
         scheduleControlsAutoHide()
     }
-
+    
     private func seekPlayer(to seconds: Double, throttled: Bool = false) {
         guard throttled else {
             pendingSeekTask?.cancel()
@@ -570,11 +564,11 @@ public struct OnlinePreviewVideoView: View {
             lastContinuousSeekAt = Date().timeIntervalSinceReferenceDate
             return
         }
-
+        
         pendingSeekTime = seconds
         let now = Date().timeIntervalSinceReferenceDate
         let elapsed = now - lastContinuousSeekAt
-
+        
         if elapsed >= continuousSeekInterval {
             pendingSeekTask?.cancel()
             pendingSeekTask = nil
@@ -583,7 +577,7 @@ public struct OnlinePreviewVideoView: View {
             lastContinuousSeekAt = now
             return
         }
-
+        
         pendingSeekTask?.cancel()
         let task = DispatchWorkItem {
             let target = pendingSeekTime ?? seconds
@@ -595,19 +589,18 @@ public struct OnlinePreviewVideoView: View {
         pendingSeekTask = task
         DispatchQueue.main.asyncAfter(deadline: .now() + max(continuousSeekInterval - elapsed, 0.01), execute: task)
     }
-
+    
     private func performSeek(to seconds: Double) {
-        guard let player else { return }
         let target = CMTime(seconds: seconds, preferredTimescale: 600)
         player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
     }
-
+    
     private func clampedTime(_ seconds: Double) -> Double {
-        let totalDuration = player?.currentItem?.duration.seconds ?? duration
+        let totalDuration = player.currentItem?.duration.seconds ?? duration
         let upperBound = totalDuration.isFinite && totalDuration > 0 ? totalDuration : max(seconds, 0)
         return min(max(seconds, 0), upperBound)
     }
-
+    
     private func formatTime(_ seconds: Double) -> String {
         guard seconds.isFinite, seconds >= 0 else { return "00:00" }
         let total = Int(seconds.rounded(.down))
@@ -621,50 +614,118 @@ public struct OnlinePreviewVideoView: View {
 @available(iOS 17.0, macOS 14.0, *)
 private struct TwoFingerSeekOverlay: UIViewRepresentable {
     let isEnabled: Bool
+    let isDoubleTapEnabled: Bool
+    let onSingleTap: () -> Void
+    let onLeftDoubleTap: () -> Void
+    let onRightDoubleTap: () -> Void
     let onStart: () -> Void
     let onChange: (_ translationX: CGFloat, _ width: CGFloat) -> Void
     let onEnd: () -> Void
-
+    
     func makeCoordinator() -> Coordinator {
-        Coordinator(onStart: onStart, onChange: onChange, onEnd: onEnd)
+        Coordinator(
+            isDoubleTapEnabled: isDoubleTapEnabled,
+            onSingleTap: onSingleTap,
+            onLeftDoubleTap: onLeftDoubleTap,
+            onRightDoubleTap: onRightDoubleTap,
+            onStart: onStart,
+            onChange: onChange,
+            onEnd: onEnd
+        )
     }
-
+    
     func makeUIView(context: Context) -> UIView {
         let view = UIView()
         view.backgroundColor = .clear
-
+        
         let recognizer = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
         recognizer.minimumNumberOfTouches = 2
         recognizer.maximumNumberOfTouches = 2
         recognizer.cancelsTouchesInView = false
         context.coordinator.recognizer = recognizer
         view.addGestureRecognizer(recognizer)
+        
+        let singleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleSingleTap(_:)))
+        singleTap.numberOfTapsRequired = 1
+        singleTap.cancelsTouchesInView = false
+        context.coordinator.singleTapRecognizer = singleTap
+        view.addGestureRecognizer(singleTap)
+        
+        let doubleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDoubleTap(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        doubleTap.cancelsTouchesInView = false
+        context.coordinator.doubleTapRecognizer = doubleTap
+        view.addGestureRecognizer(doubleTap)
+        
+        singleTap.require(toFail: doubleTap)
         return view
     }
-
+    
     func updateUIView(_ uiView: UIView, context: Context) {
+        context.coordinator.isDoubleTapEnabled = isDoubleTapEnabled
+        context.coordinator.onSingleTap = onSingleTap
+        context.coordinator.onLeftDoubleTap = onLeftDoubleTap
+        context.coordinator.onRightDoubleTap = onRightDoubleTap
         context.coordinator.onStart = onStart
         context.coordinator.onChange = onChange
         context.coordinator.onEnd = onEnd
         context.coordinator.recognizer?.isEnabled = isEnabled
+        context.coordinator.singleTapRecognizer?.isEnabled = isEnabled
+        context.coordinator.doubleTapRecognizer?.isEnabled = isEnabled
     }
-
+    
     final class Coordinator: NSObject {
+        var isDoubleTapEnabled: Bool
+        var onSingleTap: () -> Void
+        var onLeftDoubleTap: () -> Void
+        var onRightDoubleTap: () -> Void
         var onStart: () -> Void
         var onChange: (_ translationX: CGFloat, _ width: CGFloat) -> Void
         var onEnd: () -> Void
         weak var recognizer: UIPanGestureRecognizer?
-
+        weak var singleTapRecognizer: UITapGestureRecognizer?
+        weak var doubleTapRecognizer: UITapGestureRecognizer?
+        
         init(
+            isDoubleTapEnabled: Bool,
+            onSingleTap: @escaping () -> Void,
+            onLeftDoubleTap: @escaping () -> Void,
+            onRightDoubleTap: @escaping () -> Void,
             onStart: @escaping () -> Void,
             onChange: @escaping (_ translationX: CGFloat, _ width: CGFloat) -> Void,
             onEnd: @escaping () -> Void
         ) {
+            self.isDoubleTapEnabled = isDoubleTapEnabled
+            self.onSingleTap = onSingleTap
+            self.onLeftDoubleTap = onLeftDoubleTap
+            self.onRightDoubleTap = onRightDoubleTap
             self.onStart = onStart
             self.onChange = onChange
             self.onEnd = onEnd
         }
-
+        
+        @objc func handleSingleTap(_ recognizer: UITapGestureRecognizer) {
+            guard recognizer.state == .ended else { return }
+            onSingleTap()
+        }
+        
+        @objc func handleDoubleTap(_ recognizer: UITapGestureRecognizer) {
+            guard isDoubleTapEnabled,
+                  recognizer.state == .ended,
+                  let view = recognizer.view
+            else { return }
+            
+            let x = recognizer.location(in: view).x
+            let width = view.bounds.width
+            guard width > 0 else { return }
+            
+            if x < width * 0.5 {
+                onLeftDoubleTap()
+            } else {
+                onRightDoubleTap()
+            }
+        }
+        
         @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
             guard let view = recognizer.view else { return }
             switch recognizer.state {
@@ -685,6 +746,10 @@ private struct TwoFingerSeekOverlay: UIViewRepresentable {
 @available(iOS 17.0, macOS 14.0, *)
 private struct TwoFingerSeekOverlay: View {
     let isEnabled: Bool
+    let isDoubleTapEnabled: Bool
+    let onSingleTap: () -> Void
+    let onLeftDoubleTap: () -> Void
+    let onRightDoubleTap: () -> Void
     let onStart: () -> Void
     let onChange: (_ translationX: CGFloat, _ width: CGFloat) -> Void
     let onEnd: () -> Void
