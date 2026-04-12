@@ -123,6 +123,16 @@ extension URL: @retroactive Identifiable {
 @available(iOS 17.0, macOS 14.0, *)
 private struct ZoomableImageCell: View {
     let item: OnlinePreviewView.Item
+    let loader: URLImageLoader?
+    init(item: OnlinePreviewView.Item) {
+        self.item = item
+        switch item {
+        case .file(let url, let key):
+            loader = URLImageLoader(.init(url.absoluteString, size: .original, key: key))
+        case .video:
+            loader = nil
+        }
+    }
     
     // 1. 当前稳定的缩放倍数
     @State private var scale: CGFloat = 1.0
@@ -139,22 +149,10 @@ private struct ZoomableImageCell: View {
             ScrollView([.horizontal, .vertical], showsIndicators: false) {
                 Group {
                     switch item {
-                    case .file(let url, _):
-                        AsyncImage(url: url) { phase in
-                            if let image = phase.image {
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fit)
-                            } else if phase.error != nil {
-                                VStack {
-                                    Image(systemName: "exclamationmark.triangle")
-                                    Text("图片加载失败")
-                                }
-                            } else {
-                                ProgressView()
-                            }
+                    case .file(let url, let key):
+                        if let loader {
+                            ImageView(loader: loader)
                         }
-                        .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
                     case .video(let video, _):
                         VideoPlayer(player: video.player)
                             .frame(width: proxy.size.width, height: proxy.size.height)
@@ -162,8 +160,19 @@ private struct ZoomableImageCell: View {
                 }
                 .scaleEffect(totalScale)
                 .onTapGesture(count: 2) {
+                    let or: CGFloat
+                    if let ps = loader?.result.value.imageSize?.width {
+                        let sc = proxy.size.width / ps
+                        if sc > 1 {
+                            or = sc
+                        } else {
+                            or = 2.5
+                        }
+                    } else {
+                        or = 2.5
+                    }
                     withAnimation(.spring()) {
-                        scale = (scale > 1.0) ? 1.0 : 2.5
+                        scale = (scale > 1.0) ? 1.0 : or
                     }
                 }
             }

@@ -90,7 +90,7 @@ public class PredrawnProcessor: ProcessorProtocol {
     private func processorOneImage(request: ImageRequest, input: KKImage) -> KKImage? {
         let imagePixelSize = input.size * input.scale
         let viewPixelSize: CGSize
-        let w = request.size.width
+        let w = request.size.width ?? input.size.width
         if let height = request.size.height {
             viewPixelSize = CGSize(width: w, height: height) * kScale
         } else {

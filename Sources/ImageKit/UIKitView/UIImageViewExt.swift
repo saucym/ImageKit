@@ -87,9 +87,11 @@ extension KKImageView {
             self.ik_bounds = newValue
             if let loader = ik_loader {
                 let request = loader.req
-                if CGSize(width: request.size.width, height: request.size.height ?? bounds.height).equalTo(bounds.size) == false {
+                if CGSize(width: request.size.width ?? 0, height: request.size.height ?? bounds.height).equalTo(bounds.size) == false {
                     loader.task.cancel()
                     switch request.size {
+                    case .original:
+                        self.setImageWith(request: request)
                     case .absolute:
                         let newReq = request.makeRequest(newSize: .absolute(bounds.size))
                         self.setImageWith(request: newReq)

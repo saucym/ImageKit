@@ -29,7 +29,7 @@ public class MemoryCache {
     
     func cacheImageFor(request: ImageRequest) -> KKImage? {
         let hashKey = request.key.hash
-        let width = Int(exactly: request.size.width * kScale) ?? 0
+        let width = Int(exactly: (request.size.width ?? 0) * kScale) ?? 0
         let key = keyNumberFor(request: request, width: width)
         if let image = cache.object(forKey: key) {
             return image
@@ -61,7 +61,7 @@ extension MemoryCache: CacheProtocol {
     
     @MainActor public func cache(image: KKImage, for request: ImageRequest) {
         let hashKey = request.key.hash
-        let width = Int(exactly: max(image.size.width, request.size.width * kScale)) ?? 0
+        let width = Int(exactly: max(image.size.width, (request.size.width ?? 0) * kScale)) ?? 0
         let key = self.keyNumberFor(request: request, width: width)
         cache.setObject(image, forKey: key)
         

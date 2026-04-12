@@ -12,6 +12,13 @@ public enum ImagePhase : Sendable {
     case success(KKImage)
     case failure(any Error)
     
+    var imageSize: CGSize? {
+        if case .success(let image) = self {
+            return image.size
+        }
+        return nil
+    }
+    
     @ViewBuilder func buildView(loader: ImageLoader) -> some View {
         switch self {
         case .success(let image):
@@ -41,7 +48,7 @@ public enum ImagePhase : Sendable {
     @ViewBuilder private func iOSImageView(_ image: KKImage, loader: ImageLoader) -> some View {
         if loader.request.isGif != false {
             GenericView<AutoResizeImageView> {
-                let size = CGSize(width: loader.request.size.width, height: loader.request.size.height ?? 100)
+                let size = CGSize(width: loader.request.size.width ?? image.size.width, height: loader.request.size.height ?? image.size.height)
                 let view = AutoResizeImageView(size: size)
                 view.contentMode = .scaleAspectFill
                 return view

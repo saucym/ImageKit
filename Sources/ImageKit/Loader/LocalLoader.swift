@@ -36,21 +36,32 @@ extension LocalLoader: LoaderProtocol {
                 return nil
             }
         } else if let asset = request.asset {
-            var tSize = CGSize(width: request.size.width * kScale, height: 0)
+            var tSize: CGSize
+            if let width = request.size.width {
+                tSize = CGSize(width: width * kScale, height: 0)
+                var mode = PHImageContentMode.aspectFill
+                if asset.pixelHeight > asset.pixelWidth && asset.pixelWidth > 0 {
+                    mode = .default
+                    tSize.height = CGFloat(asset.pixelHeight) / CGFloat(asset.pixelWidth) * tSize.width
+                }
+                if tSize.height == 0 {
+                    if let height = request.size.height {
+                        tSize.height = height * kScale
+                    } else if asset.pixelWidth > 0 {
+                        tSize.height = CGFloat(asset.pixelHeight) / CGFloat(asset.pixelWidth) * tSize.width
+                    } else {
+                        tSize.height = tSize.width
+                    }
+                }
+            } else {
+                tSize = PHImageManagerMaximumSize
+            }
+            
             var mode = PHImageContentMode.aspectFill
             if asset.pixelHeight > asset.pixelWidth && asset.pixelWidth > 0 {
                 mode = .default
-                tSize.height = CGFloat(asset.pixelHeight) / CGFloat(asset.pixelWidth) * tSize.width
             }
-            if tSize.height == 0 {
-                if let height = request.size.height {
-                    tSize.height = height * kScale
-                } else if asset.pixelWidth > 0 {
-                    tSize.height = CGFloat(asset.pixelHeight) / CGFloat(asset.pixelWidth) * tSize.width
-                } else {
-                    tSize.height = tSize.width
-                }
-            }
+            
             let options = PHImageRequestOptions()
             options.isNetworkAccessAllowed = true
             options.resizeMode = .exact

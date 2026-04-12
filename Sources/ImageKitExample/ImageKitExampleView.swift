@@ -16,10 +16,6 @@ private let lineCount: CGFloat = 3
 private let lineCount: CGFloat = 4
 #endif
 
-extension URL: @retroactive Identifiable {
-    public var id: URL { self }
-}
-
 @available(iOS 17.0, macOS 14.0, *)
 public struct ImageKitExampleView: View {
     let store: ImagesFromHtml
@@ -28,6 +24,7 @@ public struct ImageKitExampleView: View {
     }
     @State private var tapUrl: URL? = nil
     @State private var grayed: Bool = false
+    @State var onlinePreviewUrl: OnlinePreviewView.Source? = nil
     public var body: some View {
         GeometryReader { reader in
             let cellWidth: CGFloat = (reader.size.width - lineCount + 1) / lineCount
@@ -47,7 +44,8 @@ public struct ImageKitExampleView: View {
                         }
                         .onTapGesture {
                             print(url)
-                            tapUrl = DiskCache().localPath(.init(url.absoluteString, size: .absolute(.zero)))
+//                            tapUrl = DiskCache().localPath(.init(url.absoluteString, size: .absolute(.zero)))
+                            onlinePreviewUrl = .init(current: url.id, items: [.file(url, key: url.id)])
                         }
                     }
                     if store.items.count < 0 {
@@ -64,6 +62,9 @@ public struct ImageKitExampleView: View {
             Toggle(isOn: $grayed) {
                 Text("Gray")
             }
+        }
+        .fullScreenCover(item: $onlinePreviewUrl) { sub in
+            OnlinePreviewView(state: sub)
         }
     }
 }

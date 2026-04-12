@@ -29,27 +29,30 @@ public struct RequestCache: OptionSet {
 
 public struct ImageRequest {
     public enum Size {
+        case original // 资源大小
         case absolute(CGSize) // 写死大小
         case width(CGFloat, defaultHeight: CGFloat = 44)   // 限制宽度, 保持比例计算高度
         
-        public var width: CGFloat {
+        public var width: CGFloat? {
             switch self {
-            case .absolute(let cGSize): return cGSize.width
-            case .width(let cGFloat, _): return cGFloat
+            case .original: nil
+            case .absolute(let cGSize): cGSize.width
+            case .width(let cGFloat, _): cGFloat
             }
         }
         
         public var height: CGFloat? {
             switch self {
-            case .absolute(let cGSize): return cGSize.height
-            case .width: return nil
+            case .absolute(let cGSize): cGSize.height
+            case .width, .original: nil
             }
         }
         
-        public var defaultHeight: CGFloat {
+        public var defaultHeight: CGFloat? {
             switch self {
-            case .absolute(let cGSize): return cGSize.height
-            case .width(_, let h): return h
+            case .original: nil
+            case .absolute(let cGSize): cGSize.height
+            case .width(_, let h): h
             }
         }
     }
