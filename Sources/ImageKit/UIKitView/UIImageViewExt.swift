@@ -36,13 +36,16 @@ public extension KKImageView {
         set { objc_setAssociatedObject(self, &AssociatedKeys.request, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
     }
     
-    func setImageWith(url: String, key: String? = nil) {
+    func setImageWith(url: URL, key: String? = nil) {
         let request = ImageRequest(url, self, key: key)
         self.setImageWith(request: request)
     }
 
     func setImageWith(asset: PHAsset) {
-        var request = ImageRequest(asset.localIdentifier, self)
+        guard let url = URL(string: "ph: \(asset.localIdentifier)") else {
+            return
+        }
+        var request = ImageRequest(url, self)
         request.asset = asset
         self.setImageWith(request: request)
     }

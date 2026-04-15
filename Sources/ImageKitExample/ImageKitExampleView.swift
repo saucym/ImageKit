@@ -8,6 +8,7 @@
 import SwiftUI
 import ImageKit
 import QuickLook
+import PhotosUI
 
 private let space: CGFloat = 1
 #if os(iOS)
@@ -24,6 +25,8 @@ public struct ImageKitExampleView: View {
     }
     @State private var tapUrl: URL? = nil
     @State private var grayed: Bool = false
+    @State private var showImagePicker: Bool = false
+    @State private var selectedPhotos: [PhotosPickerItem] = .init()
     @State var onlinePreviewUrl: OnlinePreviewView.Source? = nil
     public var body: some View {
         GeometryReader { reader in
@@ -33,7 +36,7 @@ public struct ImageKitExampleView: View {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: space) {
                     ForEach(store) { url in
-                        let loader = URLImageLoader(.init(url.absoluteString, size: .absolute(imageSize), processors: grayed ? [.Gay, .preDrawn] : .preDrawn))
+                        let loader = URLImageLoader(.init(url, size: .absolute(imageSize), processors: grayed ? [.Gay, .preDrawn] : .preDrawn))
                         ImageView(loader: loader)
                         .overlay(alignment: .topTrailing) {
                             Text(url.pathExtension)
@@ -45,7 +48,7 @@ public struct ImageKitExampleView: View {
                         .onTapGesture {
                             print(url)
 //                            tapUrl = DiskCache().localPath(.init(url.absoluteString, size: .absolute(.zero)))
-                            onlinePreviewUrl = .init(current: url.id, items: [.file(url, key: url.id)])
+                            onlinePreviewUrl = .init(current: url.id, items: [.init(url: url)])
                         }
                     }
                     if store.items.count < 0 {
@@ -55,6 +58,7 @@ public struct ImageKitExampleView: View {
             }
         }
         .quickLookPreview($tapUrl)
+        .photosPicker(isPresented: $showImagePicker, selection: $selectedPhotos, photoLibrary: .shared())
         .task(id: store.state.id) {
             store.send(.fetch)
         }
@@ -62,9 +66,23 @@ public struct ImageKitExampleView: View {
             Toggle(isOn: $grayed) {
                 Text("Gray")
             }
+            
+            Button {
+                showImagePicker = true
+            } label: {
+                Image(systemName: "photo.circle")
+            }
         }
         .fullScreenCover(item: $onlinePreviewUrl) { sub in
             OnlinePreviewView(state: sub)
+        }
+        .onChange(of: selectedPhotos) { oldValue, newValue in
+            if let first = newValue.first,
+                let id = first.itemIdentifier,
+                let url = URL(string: "ph://\(id)") {
+                selectedPhotos = .init()
+                onlinePreviewUrl = .init(current: url.id, items: [.init(url: url)])
+            }
         }
     }
 }

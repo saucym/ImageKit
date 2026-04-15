@@ -13,25 +13,14 @@ import UIKit
 
 @available(iOS 17.0, macOS 14.0, *)
 public struct OnlinePreviewView: View {
-    public enum Item: Identifiable, Equatable {
-        public var id: String { key }
-        case file(URL, key: String)
-        case video(Video, key: String)
-        
-        var key: String {
-            switch self {
-            case .file(_, let key): key
-            case .video(_, let key): key
-            }
-        }
-        
-        public struct Video: Equatable {
-            let url: URL
-            let player: AVPlayer
-            public init(url: URL) {
-                self.url = url
-                self.player = .init(url: url)
-            }
+    public struct Item: Identifiable, Equatable {
+        public let url: URL
+        public let id: String
+        public let videoURL: URL?
+        public init(url: URL, id: String? = nil, videoURL: URL? = nil) {
+            self.url = url
+            self.id = id ?? url.id
+            self.videoURL = videoURL
         }
     }
     
@@ -73,25 +62,7 @@ public struct OnlinePreviewView: View {
             .offset(y: offset)
             .scaleEffect(1 - (offset / 1000))
         }
-        .onChange(of: state.currentID) { old, new in
-            if let oldItem = state.items.first(where: { $0.id == old }) {
-                if case .video(let item, key: _) = oldItem {
-                    item.player.pause()
-                }
-            }
-            if let newItem = state.items.first(where: { $0.id == new }) {
-                if case .video(let item, key: _) = newItem {
-                    item.player.play()
-                }
-            }
-        }
-        .onDisappear {
-            if let newItem = state.items.first(where: { $0.id == state.currentID }) {
-                if case .video(let item, key: _) = newItem {
-                    item.player.pause()
-                }
-            }
-        }
+        .ignoresSafeArea()
         .presentationBackground(.clear)
         .simultaneousGesture(
             DragGesture()
@@ -117,21 +88,18 @@ public struct OnlinePreviewView: View {
 }
 
 extension URL: @retroactive Identifiable {
-    public var id: String { absoluteString }
+    public var id: String { absoluteString.md5 }
 }
 
 @available(iOS 17.0, macOS 14.0, *)
 private struct ZoomableImageCell: View {
     let item: OnlinePreviewView.Item
-    let loader: URLImageLoader?
+    let loader: URLImageLoader
+    @ObservedObject private var result: ImageResultObservableObject
     init(item: OnlinePreviewView.Item) {
         self.item = item
-        switch item {
-        case .file(let url, let key):
-            loader = URLImageLoader(.init(url.absoluteString, size: .original, key: key))
-        case .video:
-            loader = nil
-        }
+        loader = URLImageLoader(.init(item.url, size: .original, key: item.id))
+        result = loader.result
     }
     
     // 1. 当前稳定的缩放倍数
@@ -139,61 +107,57 @@ private struct ZoomableImageCell: View {
     // 2. 手势进行中的临时缩放增量
     @GestureState private var gestureScale: CGFloat = 1.0
     
-    // 最终计算出的缩放倍数
-    var totalScale: CGFloat {
-        scale * gestureScale
-    }
-    
     var body: some View {
         GeometryReader { proxy in
             ScrollView([.horizontal, .vertical], showsIndicators: false) {
-                Group {
-                    switch item {
-                    case .file:
-                        if let loader {
-                            ImageView(loader: loader)
+                switch result.value {
+                case .success(let image):
+                    let totalScale = scale * gestureScale
+                    Group {
+                        #if os(iOS)
+                        iOSImageView(image, loader: loader)
+                        #else
+                        buildImageView(image)
+                        #endif
+                    }
+                    .frame(width: proxy.size.width, height: proxy.size.width / image.size.width * image.size.height)
+                    .scaleEffect(totalScale)
+                    .onTapGesture(count: 2) {
+                        withAnimation(.spring()) {
+                            scale = (scale > 1.0) ? 1.0 : 2.5
                         }
-                    case .video(let video, _):
-                        VideoPlayer(player: video.player)
-                            .frame(width: proxy.size.width, height: proxy.size.height)
                     }
-                }
-                .scaleEffect(totalScale)
-                .onTapGesture(count: 2) {
-                    let or: CGFloat
-                    if let ps = loader?.result.value.imageSize?.width {
-                        let sc = proxy.size.width / ps
-                        if sc > 1 {
-                            or = sc
-                        } else {
-                            or = 2.5
-                        }
-                    } else {
-                        or = 2.5
-                    }
-                    withAnimation(.spring()) {
-                        scale = (scale > 1.0) ? 1.0 : or
-                    }
+                    .gesture(
+                        MagnifyGesture()
+                            .updating($gestureScale) { value, state, _ in
+                                state = value.magnification
+                            }
+                            .onEnded { value in
+                                withAnimation(.spring()) {
+                                    scale *= value.magnification
+                                    // 限制缩放范围：最小 1 倍，最大 4 倍
+                                    scale = min(max(scale, 1.0), scale * 4.0)
+                                }
+                            }
+                    )
+                case .empty:
+                    ProgressView()
+                        .frame(width: loader.request.size.width, height: loader.request.size.defaultHeight)
+                        .border(color: .gray)
+                case .failure:
+                    Text("error")
+                        .frame(width: loader.request.size.width, height: loader.request.size.defaultHeight)
+                        .border(color: .red)
                 }
             }
         }
-        // 5. 绑定缩放手势 (iOS 17 推荐方式)
-        .gesture(
-            MagnifyGesture()
-                .updating($gestureScale) { value, state, _ in
-                    state = value.magnification
-                }
-                .onEnded { value in
-                    withAnimation(.spring()) {
-                        scale *= value.magnification
-                        // 限制缩放范围：最小 1 倍，最大 4 倍
-                        scale = min(max(scale, 1.0), 4.0)
-                    }
-                }
-        )
-        // 6. 关键：当缩放大于 1 时，允许 ScrollView 接管手势
-        // 从而实现在放大状态下可以拖动查看图片边缘
-        .scrollDisabled(totalScale <= 1.0)
+        // 实现可以拖动查看图片边缘
+        .scrollDisabled(scale <= 1.0)
+        .task(id: "\(loader.request.size)-\(loader.request.processors.rawValue)") {
+            if case .success = result.value { } else {
+                await loader.loadImage()
+            }
+        }
     }
 }
 

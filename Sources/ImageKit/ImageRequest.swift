@@ -89,7 +89,7 @@ public struct ImageRequest {
     }
     
     public private(set) var key: String
-    public private(set) var url: String
+    public private(set) var url: URL
     public private(set) var size: Size
     public private(set) var mode: ContentMode
     public let isGif: Bool? // true: decode to gif, false: decode to image, nil: auto
@@ -99,7 +99,7 @@ public struct ImageRequest {
     public var info: AnyObject?
     public var asset: PHAsset?
     
-    public init(_ url: String,
+    public init(_ url: URL,
                 size: Size,
                 mode: ContentMode = .fill,
                 key: String? = nil,
@@ -117,11 +117,11 @@ public struct ImageRequest {
         if let isGif {
             self.isGif = isGif
         } else {
-            self.isGif = ((url as NSString).pathExtension.lowercased() == "gif")
+            self.isGif = url.pathExtension.lowercased() == "gif"
         }
     }
     
-    public init(_ url: String,
+    public init(_ url: URL,
                 _ imageView: KKImageView,
                 key: String? = nil,
                 processors: RequestProcessor = .preDrawn,
@@ -142,7 +142,7 @@ public struct ImageRequest {
         if let isGif {
             self.isGif = isGif
         } else {
-            self.isGif = ((url as NSString).pathExtension.lowercased() == "gif")
+            self.isGif = url.pathExtension.lowercased() == "gif"
         }
     }
     
@@ -154,13 +154,13 @@ public struct ImageRequest {
         return newRequest
     }
 
-    static public func cacheKeyFor(_ url: String) -> String {
-        var ext = (url as NSString).pathExtension
+    static public func cacheKeyFor(_ url: URL) -> String {
+        var ext = url.pathExtension
         if ext.count == 0 {
             ext = "jpg"
         }
 
-        return url.md5 + ".\(ext)"
+        return url.absoluteString.md5 + ".\(ext)"
     }
     
     public func localPath() -> URL {
@@ -253,10 +253,14 @@ private extension ImageRequest.Context {
             }
             taskMap[key] = task
         }
-        
-        let result = try await task.value
-        taskMap[key] = nil
-        return result
+        do {
+            let result = try await task.value
+            taskMap[key] = nil
+            return result
+        } catch {
+            taskMap[key] = nil
+            throw error
+        }
     }
 }
 

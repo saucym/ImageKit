@@ -26,7 +26,7 @@ public enum ImagePhase : Sendable {
             if loader.request.context.isDisplay() {
                 iOSImageView(image, loader: loader)
             } else {
-                Text(loader.request.isGif == false ? "\((loader.request.url as NSString).lastPathComponent)" : "gif")
+                Text(loader.request.isGif == false ? "\(loader.request.url.lastPathComponent)" : "gif")
                     .frame(width: loader.request.size.width, height: loader.request.size.height ?? image.size.height / KKScreen.main.scale)
                     .border(color: .green)
             }
@@ -43,34 +43,34 @@ public enum ImagePhase : Sendable {
                 .border(color: .red)
         }
     }
-    
-    #if os(iOS)
-    @ViewBuilder private func iOSImageView(_ image: KKImage, loader: ImageLoader) -> some View {
-        if loader.request.isGif != false {
-            GenericView<AutoResizeImageView> {
-                let size = CGSize(width: loader.request.size.width ?? image.size.width, height: loader.request.size.height ?? image.size.height)
-                let view = AutoResizeImageView(size: size)
-                view.contentMode = .scaleAspectFill
-                return view
-            } updater: { view in
-                view.image = image
-            }
-            .frame(width: loader.request.size.width, height: loader.request.size.height)
-            .clipped()
-            .contentShape(Rectangle())
-        } else {
-            buildImageView(image, loader: loader)
+}
+
+#if os(iOS)
+@ViewBuilder func iOSImageView(_ image: KKImage, loader: ImageLoader) -> some View {
+    if loader.request.isGif != false {
+        GenericView<AutoResizeImageView> {
+            let size = CGSize(width: loader.request.size.width ?? image.size.width, height: loader.request.size.height ?? image.size.height)
+            let view = AutoResizeImageView(size: size)
+            view.contentMode = .scaleAspectFill
+            return view
+        } updater: { view in
+            view.image = image
         }
+        .frame(width: loader.request.size.width, height: loader.request.size.height)
+        .clipped()
+        .contentShape(Rectangle())
+    } else {
+        buildImageView(image, loader: loader)
     }
-    #endif
-    
-    private func buildImageView(_ image: KKImage, loader: ImageLoader) -> some View {
-        image.swiftUIView
-            .resizable()
-            .scaledToFill()
-            .frame(width: loader.request.size.width, height: loader.request.size.height)
-            .clipped()
-    }
+}
+#endif
+
+func buildImageView(_ image: KKImage, loader: ImageLoader) -> some View {
+    image.swiftUIView
+        .resizable()
+        .scaledToFill()
+        .frame(width: loader.request.size.width, height: loader.request.size.height)
+        .clipped()
 }
 
 public class ImageResultObservableObject: ObservableObject {
@@ -98,7 +98,7 @@ public struct ImageView: View {
     
     public init(url: URL,
                 size: ImageRequest.Size) {
-        loader = URLImageLoader(.init(url.absoluteString, size: size))
+        loader = URLImageLoader(.init(url, size: size))
     }
     private let loader: ImageLoader
     public var body: some View {
@@ -119,7 +119,7 @@ public struct ImageCustomView<Content>: View where Content : View {
     public init(url: URL,
                 size: ImageRequest.Size,
                 @ViewBuilder content: @escaping (ImagePhase, ImageLoader) -> Content) {
-        let loader = URLImageLoader(.init(url.absoluteString, size: size))
+        let loader = URLImageLoader(.init(url, size: size))
         self.init(loader: loader, content: content)
     }
     
