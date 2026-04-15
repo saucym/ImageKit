@@ -31,7 +31,7 @@ public enum ImagePhase : Sendable {
                     .border(color: .green)
             }
             #else
-            buildImageView(image)
+            buildImageView(image, loader: loader)
             #endif
         case .empty:
             ProgressView()

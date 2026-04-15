@@ -117,7 +117,7 @@ private struct ZoomableImageCell: View {
                         #if os(iOS)
                         iOSImageView(image, loader: loader)
                         #else
-                        buildImageView(image)
+                        buildImageView(image, loader: loader)
                         #endif
                     }
                     .frame(width: proxy.size.width, height: proxy.size.width / image.size.width * image.size.height)

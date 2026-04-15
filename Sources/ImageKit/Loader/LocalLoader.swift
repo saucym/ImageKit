@@ -22,7 +22,7 @@ public class LocalLoader: NSObject { }
 
 extension URL {
     public var assetExists: Bool {
-        if #available(iOS 16.0, *) {
+        if #available(iOS 16.0, *, macOS 13.0, *) {
             scheme == "ph" || FileManager.default.fileExists(atPath: path(percentEncoded: false))
         } else {
             scheme == "ph" || FileManager.default.fileExists(atPath: path)
