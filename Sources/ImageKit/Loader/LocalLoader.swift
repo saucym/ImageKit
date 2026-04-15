@@ -20,6 +20,16 @@ public protocol LoaderProtocol {
 
 public class LocalLoader: NSObject { }
 
+extension URL {
+    public var assetExists: Bool {
+        if #available(iOS 16.0, *) {
+            scheme == "ph" || FileManager.default.fileExists(atPath: path(percentEncoded: false))
+        } else {
+            scheme == "ph" || FileManager.default.fileExists(atPath: path)
+        }
+    }
+}
+
 extension LocalLoader: LoaderProtocol {
     public func isValid(request: ImageRequest) -> Bool {
         return request.url.scheme != "http" && request.url.scheme != "https"

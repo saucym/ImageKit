@@ -48,14 +48,18 @@ extension DiskCache: LoaderProtocol {
 }
 
 extension DiskCache {
-    public func localPath(_ request: ImageRequest) -> URL {
-        if request.context.useSubDir {
-            let subName = request.key.prefix(2)
+    public func localPath(_ key: String, context: ImageRequest.Context) -> URL {
+        if context.useSubDir {
+            let subName = key.prefix(2)
             return self.dir
                 .appendingPathComponent(String(subName))
-                .appendingPathComponent(request.key)
+                .appendingPathComponent(key)
         }
-        return self.dir.appendingPathComponent(request.key)
+        return self.dir.appendingPathComponent(key)
+    }
+    
+    public func localPath(_ request: ImageRequest) -> URL {
+        localPath(request.key, context: request.context)
     }
     
     public func cache(data: Data, for request: ImageRequest) {
