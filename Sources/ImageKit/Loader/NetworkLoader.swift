@@ -24,7 +24,7 @@ extension NetworkLoader: LoaderProtocol {
             if needCache {
                 request.context.disk.cache(data: data, for: request)
             }
-            logDebug("did load: \(request.key), data: \(data.count)")
+            logDebug("did load: \(request.key), data: \(ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file))")
             return .data(data)
         } catch {
             logInfo(request.url, error.localizedDescription)

@@ -47,7 +47,7 @@ public struct ImageKitExampleView: View {
                         }
                         .onTapGesture {
                             print(url)
-//                            tapUrl = DiskCache().localPath(.init(url.absoluteString, size: .absolute(.zero)))
+//                            tapUrl = DiskLoader().localPath(.init(url.absoluteString, size: .absolute(.zero)))
                             onlinePreviewUrl = .init(current: url.id, items: [.init(url: url)])
                         }
                     }

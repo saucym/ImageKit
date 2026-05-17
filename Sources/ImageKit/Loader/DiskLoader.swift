@@ -1,5 +1,5 @@
 //
-//  DiskCache.swift
+//  DiskLoader.swift
 //  ImageKit
 //
 //  Created by saucymqin on 2018/7/24.
@@ -7,21 +7,23 @@
 
 import Foundation
 
-public struct DiskCache: Hashable {
+public struct DiskLoader: Hashable {
     public let dir: URL
-    public init(_ customDir: URL? = nil) {
+    private let splitSubDir: Bool
+    public init(_ customDir: URL? = nil, splitSubDir: Bool = true) {
         dir = customDir ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("ImageKit")
+        self.splitSubDir = splitSubDir
         if !FileManager.default.fileExists(atPath: dir.path) {
             do {
                 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
             } catch {
-                logInfo("DiskCache.error:\(error)")
+                logInfo("DiskLoader.error:\(error)")
             }
         }
     }
 }
 
-extension DiskCache: LoaderProtocol {
+extension DiskLoader: LoaderProtocol {
     public func isValid(request: ImageRequest) -> Bool {
         return request.caches.contains(.Disk)
     }
@@ -47,9 +49,9 @@ extension DiskCache: LoaderProtocol {
     }
 }
 
-extension DiskCache {
+extension DiskLoader {
     public func localPath(_ key: String, context: ImageRequest.Context) -> URL {
-        if context.useSubDir {
+        if splitSubDir {
             let subName = key.prefix(2)
             return self.dir
                 .appendingPathComponent(String(subName))
@@ -70,7 +72,7 @@ extension DiskCache {
                 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
                 try data.write(to: url)
             } catch {
-                logInfo("DiskCache.cache.error:\(error)")
+                logInfo("DiskLoader.cache.error:\(error)")
             }
         }
     }

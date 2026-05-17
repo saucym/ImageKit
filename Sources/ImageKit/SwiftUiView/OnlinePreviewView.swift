@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import PhotosUI
 import AVKit
 #if os(iOS)
 import UIKit
@@ -16,11 +17,13 @@ public struct OnlinePreviewView: View {
     public struct Item: Identifiable, Equatable {
         public let url: URL
         public let id: String
-        public let videoURL: URL?
-        public init(url: URL, id: String? = nil, videoURL: URL? = nil) {
+        public let liveVideo: [Item]
+        let loader: URLImageLoader
+        @MainActor public init(url: URL, id: String? = nil, liveVideo: [Item] = []) {
             self.url = url
             self.id = id ?? url.id
-            self.videoURL = videoURL
+            self.liveVideo = liveVideo
+            self.loader = URLImageLoader(.init(url, size: .original, key: self.id), liveVideo: liveVideo.first.map { .init($0.url, size: .original, key: $0.id) })
         }
     }
     
@@ -94,12 +97,11 @@ extension URL: @retroactive Identifiable {
 @available(iOS 17.0, macOS 14.0, *)
 private struct ZoomableImageCell: View {
     let item: OnlinePreviewView.Item
-    let loader: URLImageLoader
+    var loader: URLImageLoader { item.loader }
     @ObservedObject private var result: ImageResultObservableObject
     init(item: OnlinePreviewView.Item) {
         self.item = item
-        loader = URLImageLoader(.init(item.url, size: .original, key: item.id))
-        result = loader.result
+        result = item.loader.result
     }
     
     // 1. 当前稳定的缩放倍数
@@ -114,11 +116,37 @@ private struct ZoomableImageCell: View {
                 case .success(let image):
                     let totalScale = scale * gestureScale
                     Group {
-                        #if os(iOS)
-                        iOSImageView(image, loader: loader)
-                        #else
-                        buildImageView(image, loader: loader)
-                        #endif
+                        if let livePhoto = result.livePhoto {
+                            LivePhotoView(livePhoto: livePhoto)
+                                .overlay(alignment: .bottomTrailing) {
+                                    Image(systemName: "livephoto")
+                                        .padding(10)
+                                }
+                        } else {
+                            Group {
+                                #if os(iOS)
+                                iOSImageView(image, loader: loader)
+                                #else
+                                buildImageView(image, loader: loader)
+                                #endif
+                            }
+                            .overlay(alignment: .bottomTrailing) {
+                                if let first = item.liveVideo.first {
+                                    Button {
+                                        loader.loadLivePhoto()
+                                    } label: {
+                                        if loader.result.livePhotoLoading {
+                                            ProgressView()
+                                                .padding(10)
+                                        } else {
+                                            Image(systemName: "livephoto")
+                                                .padding(10)
+                                        }
+                                    }
+                                    .disabled(loader.result.livePhotoLoading)
+                                }
+                            }
+                        }
                     }
                     .frame(width: proxy.size.width, height: proxy.size.width / image.size.width * image.size.height)
                     .scaleEffect(totalScale)
@@ -158,5 +186,20 @@ private struct ZoomableImageCell: View {
                 await loader.loadImage()
             }
         }
+    }
+}
+
+struct LivePhotoView: UIViewRepresentable {
+    let livePhoto: PHLivePhoto
+
+    func makeUIView(context: Context) -> PHLivePhotoView {
+        let view = PHLivePhotoView()
+        view.livePhoto = livePhoto
+        view.isMuted = false
+        return view
+    }
+
+    func updateUIView(_ uiView: PHLivePhotoView, context: Context) {
+        uiView.livePhoto = livePhoto
     }
 }

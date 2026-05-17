@@ -45,8 +45,7 @@ public extension KKImageView {
         guard let url = URL(string: "ph: \(asset.localIdentifier)") else {
             return
         }
-        var request = ImageRequest(url, self)
-        request.asset = asset
+        var request = ImageRequest(url, self, asset: asset)
         self.setImageWith(request: request)
     }
     
@@ -115,5 +114,46 @@ extension ImageRequest {
         hasher.combine(width ?? size.width)
         hasher.combine(processors.rawValue)
         return hasher.finalize()
+    }
+    
+    init(_ url: URL,
+         _ imageView: KKImageView,
+         key: String? = nil,
+         processors: RequestProcessor = .preDrawn,
+         caches: RequestCache = [.Memory, .Disk],
+         isGif: Bool? = nil,
+         asset: PHAsset? = nil,
+         context: Context = .default) {
+        self.key = key ?? ImageRequest.cacheKeyFor(url)
+        self.url = url
+        self.size = .absolute(imageView.bounds.size)
+        #if os(iOS)
+        self.mode = imageView.contentMode == .scaleAspectFill ? .fill : .fit
+        #else
+        self.mode = .fill
+        #endif
+        self.info = nil
+        self.asset = asset
+        self.processors = processors
+        self.caches = caches
+        self.context = context
+        if let isGif {
+            self.isGif = isGif
+        } else {
+            self.isGif = url.pathExtension.lowercased() == "gif"
+        }
+    }
+    
+    public func makeRequest(newSize: Size) -> ImageRequest {
+        return ImageRequest(url,
+                            size: newSize,
+                            mode: mode,
+                            key: key,
+                            isGif: isGif,
+                            info: info,
+                            asset: asset,
+                            processors: processors,
+                            caches: caches,
+                            context: context)
     }
 }

@@ -59,8 +59,7 @@ public struct ImageRequest {
     
     public actor Context {
         public static let `default` = Context()
-        public nonisolated let disk: DiskCache
-        public nonisolated let useSubDir: Bool
+        public nonisolated let disk: DiskLoader
         public nonisolated let decoder: [DecoderProtocol]
         public nonisolated let cacher: [CacheProtocol]
         public nonisolated let processor: [ProcessorProtocol]
@@ -69,15 +68,13 @@ public struct ImageRequest {
         let tag: Int // 1: hidden image
         #endif
         var taskMap = [Int: Task<KKImage, Error>]()
-        public init(disk: DiskCache = .init(),
-             useSubDir: Bool = true,
-             decoder: [DecoderProtocol] = [SystemDecoder()],
-             cacher: [CacheProtocol] = [MemoryCache.shared],
-             processor: [ProcessorProtocol] = [GrayProcessor(), PredrawnProcessor()],
+        public init(disk: DiskLoader = .init(),
+                    decoder: [DecoderProtocol] = [SystemDecoder()],
+                    cacher: [CacheProtocol] = [MemoryCache.shared],
+                    processor: [ProcessorProtocol] = [GrayProcessor(), PredrawnProcessor()],
                     loader: [LoaderProtocol] = [LocalLoader(), NetworkLoader()],
                     tag: Int = 0) {
             self.disk = disk
-            self.useSubDir = useSubDir
             self.decoder = decoder
             self.cacher = cacher
             self.processor = processor
@@ -88,29 +85,33 @@ public struct ImageRequest {
         }
     }
     
-    public private(set) var key: String
-    public private(set) var url: URL
-    public private(set) var size: Size
-    public private(set) var mode: ContentMode
+    public let key: String
+    public let url: URL
+    public let size: Size
+    public let mode: ContentMode
     public let isGif: Bool? // true: decode to gif, false: decode to image, nil: auto
+    public let info: Any?
+    public let asset: PHAsset?
+    public let processors: RequestProcessor
+    public let caches: RequestCache
     public let context: Context
-    public var processors: RequestProcessor = .preDrawn
-    public var caches: RequestCache
-    public var info: AnyObject?
-    public var asset: PHAsset?
     
     public init(_ url: URL,
                 size: Size,
                 mode: ContentMode = .fill,
                 key: String? = nil,
+                isGif: Bool? = nil,
+                info: Any? = nil,
+                asset: PHAsset? = nil,
                 processors: RequestProcessor = .preDrawn,
                 caches: RequestCache = [.Memory, .Disk],
-                isGif: Bool? = nil,
                 context: Context = .default) {
         self.key = key ?? ImageRequest.cacheKeyFor(url)
         self.url = url
         self.size = size
         self.mode = mode
+        self.info = info
+        self.asset = asset
         self.processors = processors
         self.caches = caches
         self.context = context
@@ -121,45 +122,12 @@ public struct ImageRequest {
         }
     }
     
-    public init(_ url: URL,
-                _ imageView: KKImageView,
-                key: String? = nil,
-                processors: RequestProcessor = .preDrawn,
-                caches: RequestCache = [.Memory, .Disk],
-                isGif: Bool? = nil,
-                context: Context = .default) {
-        self.key = key ?? ImageRequest.cacheKeyFor(url)
-        self.url = url
-        self.size = .absolute(imageView.bounds.size)
-        #if os(iOS)
-        self.mode = imageView.contentMode == .scaleAspectFill ? .fill : .fit
-        #else
-        self.mode = .fill
-        #endif
-        self.processors = processors
-        self.caches = caches
-        self.context = context
-        if let isGif {
-            self.isGif = isGif
-        } else {
-            self.isGif = url.pathExtension.lowercased() == "gif"
-        }
-    }
-    
-    public func makeRequest(newSize: Size) -> ImageRequest {
-        var newRequest = ImageRequest(self.url, size: newSize, mode: self.mode, key: self.key, processors: self.processors)
-        newRequest.caches = self.caches
-        newRequest.info = self.info
-        newRequest.asset = self.asset
-        return newRequest
-    }
-
     static public func cacheKeyFor(_ url: URL) -> String {
         var ext = url.pathExtension
         if ext.count == 0 {
             ext = "jpg"
         }
-
+        
         return url.absoluteString.md5 + ".\(ext)"
     }
     
@@ -179,7 +147,7 @@ extension ImageRequest {
         
         throw IKError.decoderIsEmpty
     }
-
+    
     // MARK: - Cacher
     @MainActor func cachedImage() throws -> KKImage? {
         for operation in context.cacher {
@@ -299,8 +267,8 @@ extension String {
         guard let data = data(using: .utf8) else {
             return self
         }
-//        let digest = SHA256.hash(data: data)
-//        let digest = Insecure.SHA1.hash(data: data)
+        //        let digest = SHA256.hash(data: data)
+        //        let digest = Insecure.SHA1.hash(data: data)
         let digest = Insecure.MD5.hash(data: data)
         return digest.map { String(format: "%02x" , $0 ) }.joined()
     }

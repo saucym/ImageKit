@@ -14,10 +14,14 @@ public struct URLImageLoader: ImageLoader, Equatable {
     
     public var result: ImageResultObservableObject = .init()
     public let request: ImageRequest
-    @MainActor public init(_ request: ImageRequest) {
+    public let liveVideo: ImageRequest?
+    @MainActor public init(_ request: ImageRequest, liveVideo: ImageRequest? = nil) {
         self.request = request
+        self.liveVideo = liveVideo
         do {
-            if let image = try request.cachedImage() {
+            if let liveVideo {
+                syncLoadLivePhoto()
+            } else if let image = try request.cachedImage() {
                 result.value = .success(image)
             }
         } catch {
