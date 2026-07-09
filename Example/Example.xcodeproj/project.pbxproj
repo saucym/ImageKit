@@ -10,9 +10,9 @@
 		B30746D52CAA935200C7D35D /* ExampleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30746D42CAA935200C7D35D /* ExampleApp.swift */; };
 		B30746D92CAA935400C7D35D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B30746D82CAA935400C7D35D /* Assets.xcassets */; };
 		B30746DD2CAA935400C7D35D /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B30746DC2CAA935400C7D35D /* Preview Assets.xcassets */; };
-		B30746E52CAA937A00C7D35D /* ImageKit in Frameworks */ = {isa = PBXBuildFile; productRef = B30746E42CAA937A00C7D35D /* ImageKit */; };
 		B3C504762E2F71AC00B88AE1 /* ImageKit in Frameworks */ = {isa = PBXBuildFile; productRef = B3C504752E2F71AC00B88AE1 /* ImageKit */; };
-		B3C504782E2F71AC00B88AE1 /* ImageKitExample in Frameworks */ = {isa = PBXBuildFile; productRef = B3C504772E2F71AC00B88AE1 /* ImageKitExample */; };
+		B3A100012F0A000100000001 /* ImageKitExampleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3A100002F0A000100000001 /* ImageKitExampleView.swift */; };
+		B3A100032F0A000100000001 /* ImagesFromHtml.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3A100022F0A000100000001 /* ImagesFromHtml.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -22,6 +22,8 @@
 		B30746DA2CAA935400C7D35D /* Example.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Example.entitlements; sourceTree = "<group>"; };
 		B30746DC2CAA935400C7D35D /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		B30746EA2CAA953F00C7D35D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		B3A100002F0A000100000001 /* ImageKitExampleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageKitExampleView.swift; sourceTree = "<group>"; };
+		B3A100022F0A000100000001 /* ImagesFromHtml.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagesFromHtml.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -29,8 +31,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B3C504782E2F71AC00B88AE1 /* ImageKitExample in Frameworks */,
-				B30746E52CAA937A00C7D35D /* ImageKit in Frameworks */,
 				B3C504762E2F71AC00B88AE1 /* ImageKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -59,6 +59,8 @@
 			children = (
 				B30746EA2CAA953F00C7D35D /* Info.plist */,
 				B30746D42CAA935200C7D35D /* ExampleApp.swift */,
+				B3A100002F0A000100000001 /* ImageKitExampleView.swift */,
+				B3A100022F0A000100000001 /* ImagesFromHtml.swift */,
 				B30746D82CAA935400C7D35D /* Assets.xcassets */,
 				B30746DA2CAA935400C7D35D /* Example.entitlements */,
 				B30746DB2CAA935400C7D35D /* Preview Content */,
@@ -91,9 +93,7 @@
 			);
 			name = Example;
 			packageProductDependencies = (
-				B30746E42CAA937A00C7D35D /* ImageKit */,
 				B3C504752E2F71AC00B88AE1 /* ImageKit */,
-				B3C504772E2F71AC00B88AE1 /* ImageKitExample */,
 			);
 			productName = Example;
 			productReference = B30746D12CAA935200C7D35D /* Example.app */;
@@ -153,6 +153,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				B30746D52CAA935200C7D35D /* ExampleApp.swift in Sources */,
+				B3A100012F0A000100000001 /* ImageKitExampleView.swift in Sources */,
+				B3A100032F0A000100000001 /* ImagesFromHtml.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -394,17 +396,9 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		B30746E42CAA937A00C7D35D /* ImageKit */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = ImageKit;
-		};
 		B3C504752E2F71AC00B88AE1 /* ImageKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ImageKit;
-		};
-		B3C504772E2F71AC00B88AE1 /* ImageKitExample */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = ImageKitExample;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

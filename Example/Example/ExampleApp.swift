@@ -6,7 +6,7 @@
 //
 
 import SwiftUI
-import ImageKitExample
+import ImageKit
 
 @main
 struct ExampleApp: App {

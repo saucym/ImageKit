@@ -18,9 +18,9 @@ private let lineCount: CGFloat = 4
 #endif
 
 @available(iOS 17.0, macOS 14.0, *)
-public struct ImageKitExampleView: View {
+struct ImageKitExampleView: View {
     let store: ImagesFromHtml
-    public init(store: ImagesFromHtml) {
+    init(store: ImagesFromHtml) {
         self.store = store
     }
     @State private var tapUrl: URL? = nil

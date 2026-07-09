@@ -13,9 +13,6 @@ let package = Package(
         .library(
             name: "ImageKit",
             targets: ["ImageKit"]),
-        .library(
-            name: "ImageKitExample",
-            targets: ["ImageKitExample"]),
     ],
     dependencies: [
     ],
@@ -23,9 +20,6 @@ let package = Package(
         .target(
             name: "ImageKit",
             dependencies: []),
-        .target(
-            name: "ImageKitExample",
-            dependencies: ["ImageKit"]),
         .testTarget(
             name: "ImageKitTests",
             dependencies: ["ImageKit"]),
