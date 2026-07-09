@@ -8,11 +8,6 @@
 import Foundation
 import ImageIO
 
-public protocol DecoderProtocol {
-    func isValid(request: ImageRequest) -> Bool
-    func decoder(request: ImageRequest, data: Data) throws -> KKImage
-}
-
 #if os(iOS)
 extension KKImage.Orientation {
     init(_ cgOrientation: CGImagePropertyOrientation) {
@@ -29,107 +24,94 @@ extension KKImage.Orientation {
     }
 }
 #endif
+
 public class SystemDecoder: NSObject { }
 
-extension SystemDecoder: DecoderProtocol {
+extension SystemDecoder: ImageDecoder {
     public func isValid(request: ImageRequest) -> Bool {
-        return true
+        true
     }
     
-    public func decoder(request: ImageRequest, data: Data) throws -> KKImage {
-        if let source = CGImageSourceCreateWithData(data as CFData, nil) {
-            #if os(iOS)
-            let count = CGImageSourceGetCount(source)
-            #else
-            let count = min(CGImageSourceGetCount(source), 1)
-            #endif
-            var image: KKImage?
-            if (count == 0) {
-                image = KKImage(data: data, scale: kScale)
-            } else {
-                if count == 1, request.processors.rawValue > 0 {
-                    image = KKImage(data: data, scale: kScale)
-                } else {
-                    //Calculates frame duration for a gif frame out of the kCGImagePropertyGIFDictionary dictionary
-                    func imageFrom(cgImage: CGImage, propreties: NSDictionary?) -> KKImage {
-                        #if os(iOS)
-                        var orientation = KKImage.Orientation.up
-                        if let propreties = propreties {
-                            if let num = propreties[kCGImagePropertyOrientation] as? NSNumber {
-                                if let ori = CGImagePropertyOrientation(rawValue: num.uint32Value) {
-                                    orientation = KKImage.Orientation(ori)
-                                }
-                            }
-                        }
-                        
-                        return KKImage(cgImage: cgImage, scale: kScale, orientation: orientation)
-                        #else
-                        return KKImage(cgImage: cgImage, scale: kScale)
-                        #endif
-                    }
-                    
-                    func frameDuration(from gifInfo: NSDictionary?) -> Double {
-                        let gifDefaultFrameDuration = 0.100
-                        
-                        guard let gifInfo = gifInfo else {
-                            return gifDefaultFrameDuration
-                        }
-                        
-                        let unclampedDelayTime = gifInfo[kCGImagePropertyGIFUnclampedDelayTime as String] as? NSNumber
-                        let delayTime = gifInfo[kCGImagePropertyGIFDelayTime as String] as? NSNumber
-                        let duration = unclampedDelayTime ?? delayTime
-                        
-                        guard let frameDuration = duration else { return gifDefaultFrameDuration }
-                        
-                        return frameDuration.doubleValue > 0.011 ? frameDuration.doubleValue : gifDefaultFrameDuration
-                    }
-                    
-                    // The first picture needs to be set kCGImageSourceShouldCacheImmediately
-                    var optionDict = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, nil, nil) as Dictionary
-                    optionDict[kCGImageSourceShouldCacheImmediately] = kCFBooleanTrue
-                    let option = optionDict as CFDictionary
-                    var list = [KKImage]()
-                    var duration = 0.0
-                    let firstPropreties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
-                    for i in 0..<count {
-                        if let cgImage = CGImageSourceCreateImageAtIndex(source, i, i == 0 ? option : nil) {
-                            var propreties: NSDictionary?
-                            if i == 0 {
-                                propreties = firstPropreties
-                            } else {
-                                propreties = CGImageSourceCopyPropertiesAtIndex(source, i, nil)
-                            }
-                            let indexImage = imageFrom(cgImage: cgImage, propreties: firstPropreties)
-                            list.append(indexImage)
-                            
-                            if let propreties = propreties {
-                                if let gifInfo = propreties[kCGImagePropertyGIFDictionary as String] as? NSDictionary {
-                                    duration += frameDuration(from: gifInfo)
-                                }
-                            }
-                        }
-                    }
-                    
-                    if list.count <= 1 {
-                        image = list.first
-                    } else if list.count > 1 {
-                        #if os(iOS)
-                        image = KKImage.animatedImage(with: list, duration: duration)
-                        #else
-                        image = list.first
-                        #endif
-                    }
-                }
-            }
-            
-            if let image {
-                return image
-            } else {
-                throw IKError.decoderImageIsNil
-            }
-        } else {
+    public func decode(request: ImageRequest, data: Data) throws -> KKImage {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
             throw IKError.imageSourceCreateError
         }
+        
+        #if os(iOS)
+        let count = CGImageSourceGetCount(source)
+        #else
+        let count = min(CGImageSourceGetCount(source), 1)
+        #endif
+        
+        let image: KKImage?
+        if count == 0 {
+            image = KKImage(data: data, scale: screenScale)
+        } else if count == 1, request.processors.rawValue > 0 {
+            image = KKImage(data: data, scale: screenScale)
+        } else {
+            image = decodeFrames(source: source, count: count)
+        }
+        
+        guard let image else {
+            throw IKError.decoderImageIsNil
+        }
+        return image
     }
     
+    private func decodeFrames(source: CGImageSource, count: Int) -> KKImage? {
+        func imageFrom(cgImage: CGImage, properties: NSDictionary?) -> KKImage {
+            #if os(iOS)
+            var orientation = KKImage.Orientation.up
+            if let properties,
+               let num = properties[kCGImagePropertyOrientation] as? NSNumber,
+               let ori = CGImagePropertyOrientation(rawValue: num.uint32Value) {
+                orientation = KKImage.Orientation(ori)
+            }
+            return KKImage(cgImage: cgImage, scale: screenScale, orientation: orientation)
+            #else
+            return KKImage(cgImage: cgImage, scale: screenScale)
+            #endif
+        }
+        
+        func frameDuration(from gifInfo: NSDictionary?) -> Double {
+            let gifDefaultFrameDuration = 0.100
+            guard let gifInfo else { return gifDefaultFrameDuration }
+            let unclampedDelayTime = gifInfo[kCGImagePropertyGIFUnclampedDelayTime as String] as? NSNumber
+            let delayTime = gifInfo[kCGImagePropertyGIFDelayTime as String] as? NSNumber
+            guard let frameDuration = unclampedDelayTime ?? delayTime else {
+                return gifDefaultFrameDuration
+            }
+            return frameDuration.doubleValue > 0.011 ? frameDuration.doubleValue : gifDefaultFrameDuration
+        }
+        
+        // First frame caches immediately so Core Animation can reuse the bitmap
+        var optionDict = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, nil, nil) as Dictionary
+        optionDict[kCGImageSourceShouldCacheImmediately] = kCFBooleanTrue
+        let option = optionDict as CFDictionary
+        var list = [KKImage]()
+        var duration = 0.0
+        let firstProperties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
+        
+        for i in 0..<count {
+            guard let cgImage = CGImageSourceCreateImageAtIndex(source, i, i == 0 ? option : nil) else {
+                continue
+            }
+            let properties: NSDictionary? = i == 0 ? firstProperties : CGImageSourceCopyPropertiesAtIndex(source, i, nil)
+            list.append(imageFrom(cgImage: cgImage, properties: firstProperties))
+            
+            if let properties,
+               let gifInfo = properties[kCGImagePropertyGIFDictionary as String] as? NSDictionary {
+                duration += frameDuration(from: gifInfo)
+            }
+        }
+        
+        if list.count <= 1 {
+            return list.first
+        }
+        #if os(iOS)
+        return KKImage.animatedImage(with: list, duration: duration)
+        #else
+        return list.first
+        #endif
+    }
 }

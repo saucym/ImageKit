@@ -36,7 +36,7 @@ public struct ImageKitExampleView: View {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: space) {
                     ForEach(store) { url in
-                        let loader = URLImageLoader(.init(url, size: .absolute(imageSize), processors: grayed ? [.Gay, .preDrawn] : .preDrawn))
+                        let loader = URLImageLoader(.init(url, size: .absolute(imageSize), processors: grayed ? [.gray, .predrawn] : .predrawn))
                         ImageView(loader: loader)
                         .overlay(alignment: .topTrailing) {
                             Text(url.pathExtension)
@@ -47,7 +47,6 @@ public struct ImageKitExampleView: View {
                         }
                         .onTapGesture {
                             print(url)
-//                            tapUrl = DiskLoader().localPath(.init(url.absoluteString, size: .absolute(.zero)))
                             onlinePreviewUrl = .init(current: url.id, items: [.init(url: url)])
                         }
                     }
@@ -73,9 +72,15 @@ public struct ImageKitExampleView: View {
                 Image(systemName: "photo.circle")
             }
         }
+        #if os(iOS)
         .fullScreenCover(item: $onlinePreviewUrl) { sub in
             OnlinePreviewView(state: sub)
         }
+        #else
+        .sheet(item: $onlinePreviewUrl) { sub in
+            OnlinePreviewView(state: sub)
+        }
+        #endif
         .onChange(of: selectedPhotos) { oldValue, newValue in
             if let first = newValue.first,
                 let id = first.itemIdentifier,

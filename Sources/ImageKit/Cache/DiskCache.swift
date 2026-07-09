@@ -1,5 +1,5 @@
 //
-//  DiskLoader.swift
+//  DiskCache.swift
 //  ImageKit
 //
 //  Created by saucymqin on 2018/7/24.
@@ -7,9 +7,10 @@
 
 import Foundation
 
-public struct DiskLoader: Hashable {
+public struct DiskCache: Hashable {
     public let dir: URL
     private let splitSubDir: Bool
+    
     public init(_ customDir: URL? = nil, splitSubDir: Bool = true) {
         dir = customDir ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("ImageKit")
         self.splitSubDir = splitSubDir
@@ -17,24 +18,24 @@ public struct DiskLoader: Hashable {
             do {
                 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
             } catch {
-                logInfo("DiskLoader.error:\(error)")
+                logInfo("DiskCache.error:\(error)")
             }
         }
     }
 }
 
-extension DiskLoader: LoaderProtocol {
+extension DiskCache: DataLoader {
     public func isValid(request: ImageRequest) -> Bool {
-        return request.caches.contains(.Disk)
+        request.caches.contains(.disk)
     }
     
-    public func loadFor(request: ImageRequest) async -> ResultItem? {
+    public func load(request: ImageRequest) async -> LoadResult? {
         let url = localPath(request)
         guard FileManager.default.fileExists(atPath: url.path) else {
             return nil
         }
         
-        let videoSuffix = Set(arrayLiteral: "gif", "mp4", "mov")
+        let videoSuffix: Set = ["gif", "mp4", "mov"]
         if videoSuffix.contains(url.pathExtension.lowercased()) {
             do {
                 let data = try Data(contentsOf: url)
@@ -49,31 +50,30 @@ extension DiskLoader: LoaderProtocol {
     }
 }
 
-extension DiskLoader {
-    public func localPath(_ key: String, context: ImageRequest.Context) -> URL {
+extension DiskCache {
+    public func localPath(_ key: String) -> URL {
         if splitSubDir {
             let subName = key.prefix(2)
-            return self.dir
+            return dir
                 .appendingPathComponent(String(subName))
                 .appendingPathComponent(key)
         }
-        return self.dir.appendingPathComponent(key)
+        return dir.appendingPathComponent(key)
     }
     
     public func localPath(_ request: ImageRequest) -> URL {
-        localPath(request.key, context: request.context)
+        localPath(request.key)
     }
     
     public func cache(data: Data, for request: ImageRequest) {
-        if data.count > 0 {
-            let url = localPath(request)
-            do {
-                let dir = url.deletingLastPathComponent()
-                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
-                try data.write(to: url)
-            } catch {
-                logInfo("DiskLoader.cache.error:\(error)")
-            }
+        guard !data.isEmpty else { return }
+        let url = localPath(request)
+        do {
+            let dir = url.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
+            try data.write(to: url)
+        } catch {
+            logInfo("DiskCache.cache.error:\(error)")
         }
     }
 }

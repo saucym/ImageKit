@@ -9,48 +9,46 @@ import CoreGraphics
 import Foundation
 
 public extension RequestProcessor {
-    static let Gay = RequestProcessor(rawValue: 1 << 0)
+    static let gray = RequestProcessor(rawValue: 1 << 0)
 }
 
-public struct GrayProcessor: ProcessorProtocol {
-    public init () {}
+public struct GrayProcessor: ImageProcessor {
+    public init() {}
+    
     public func isValid(request: ImageRequest) -> Bool {
-        return request.processors.contains(.Gay)
+        request.processors.contains(.gray)
     }
 
-    public func processor(request: ImageRequest, input: KKImage) -> KKImage {
+    public func process(request: ImageRequest, input: KKImage) -> KKImage {
         #if os(iOS)
         if let images = input.images, !images.isEmpty {
-            let newImages = images.map { $0.imageToGray() }
+            let newImages = images.map { $0.toGray() }
             if let newImage = KKImage.animatedImage(with: newImages, duration: input.duration) {
                 return newImage
             }
         }
         #endif
-        
-        return input.imageToGray()
-    }
-
-    public func cancel(request: ImageRequest) {
+        return input.toGray()
     }
 }
 
 private extension KKImage {
-    func imageToGray() -> KKImage {
+    func toGray() -> KKImage {
         let colorSpace = CGColorSpaceCreateDeviceGray()
         let width = Int(size.width * scale)
         let height = Int(size.height * scale)
-        if let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace, bitmapInfo: CGImageByteOrderInfo.orderDefault.rawValue), let cgImage = self.cgImage {
-            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-            if let mImage = context.makeImage() {
-                #if os(iOS)
-                let image = KKImage(cgImage: mImage, scale: scale, orientation: .up)
-                #else
-                let image = KKImage(cgImage: mImage, scale: scale)
-                #endif
-                return image
-            }
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace, bitmapInfo: CGImageByteOrderInfo.orderDefault.rawValue),
+              let cgImage else {
+            return self
         }
-        return self
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        guard let grayImage = context.makeImage() else {
+            return self
+        }
+        #if os(iOS)
+        return KKImage(cgImage: grayImage, scale: scale, orientation: .up)
+        #else
+        return KKImage(cgImage: grayImage, scale: scale)
+        #endif
     }
 }

@@ -13,11 +13,6 @@ import AppKit
 import UIKit
 #endif
 
-public protocol LoaderProtocol {
-    func isValid(request: ImageRequest) -> Bool
-    func loadFor(request: ImageRequest) async -> ResultItem?
-}
-
 public class LocalLoader: NSObject { }
 
 extension URL {
@@ -30,12 +25,12 @@ extension URL {
     }
 }
 
-extension LocalLoader: LoaderProtocol {
+extension LocalLoader: DataLoader {
     public func isValid(request: ImageRequest) -> Bool {
-        return request.url.scheme != "http" && request.url.scheme != "https"
+        request.url.scheme != "http" && request.url.scheme != "https"
     }
     
-    public func loadFor(request: ImageRequest) async -> ResultItem? {
+    public func load(request: ImageRequest) async -> LoadResult? {
         if request.url.isFileURL {
             do {
                 let data = try Data(contentsOf: request.url)
@@ -48,10 +43,10 @@ extension LocalLoader: LoaderProtocol {
             let localIdentifier = request.url.absoluteString.replacingOccurrences(of: "ph://", with: "")
             await PHPhotoLibrary.requestAuthorization(for: .readWrite)
             if let asset = PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil).firstObject {
-                return await imageFor(asset: asset, size: request.size)
+                return await image(for: asset, size: request.size)
             }
         } else if let asset = request.asset {
-            return await imageFor(asset: asset, size: request.size)
+            return await image(for: asset, size: request.size)
         } else if request.url.pathExtension.lowercased() == "gif" {
             if let path = Bundle.main.path(forResource: request.url.absoluteString, ofType: nil) {
                 do {
@@ -69,28 +64,28 @@ extension LocalLoader: LoaderProtocol {
         return nil
     }
     
-    private func imageFor(asset: PHAsset, size: ImageRequest.Size) async -> ResultItem? {
-        var tSize: CGSize
+    private func image(for asset: PHAsset, size: ImageRequest.Size) async -> LoadResult? {
+        var targetSize: CGSize
         let mode: PHImageContentMode
         if let width = size.width {
-            tSize = CGSize(width: width * kScale, height: 0)
+            targetSize = CGSize(width: width * screenScale, height: 0)
             if asset.pixelHeight > asset.pixelWidth && asset.pixelWidth > 0 {
                 mode = .default
-                tSize.height = CGFloat(asset.pixelHeight) / CGFloat(asset.pixelWidth) * tSize.width
+                targetSize.height = CGFloat(asset.pixelHeight) / CGFloat(asset.pixelWidth) * targetSize.width
             } else {
                 mode = .aspectFill
             }
-            if tSize.height == 0 {
+            if targetSize.height == 0 {
                 if let height = size.height {
-                    tSize.height = height * kScale
+                    targetSize.height = height * screenScale
                 } else if asset.pixelWidth > 0 {
-                    tSize.height = CGFloat(asset.pixelHeight) / CGFloat(asset.pixelWidth) * tSize.width
+                    targetSize.height = CGFloat(asset.pixelHeight) / CGFloat(asset.pixelWidth) * targetSize.width
                 } else {
-                    tSize.height = tSize.width
+                    targetSize.height = targetSize.width
                 }
             }
         } else {
-            tSize = PHImageManagerMaximumSize
+            targetSize = PHImageManagerMaximumSize
             mode = .default
         }
         
@@ -100,7 +95,7 @@ extension LocalLoader: LoaderProtocol {
         options.deliveryMode = .highQualityFormat
         options.version = .current
         return await withCheckedContinuation { continuation in
-            PHImageManager.default().requestImage(for: asset, targetSize: tSize, contentMode: mode, options: options) { (image, _) in
+            PHImageManager.default().requestImage(for: asset, targetSize: targetSize, contentMode: mode, options: options) { image, _ in
                 if let image {
                     continuation.resume(returning: .image(image))
                 } else {

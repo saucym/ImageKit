@@ -14,8 +14,8 @@ A[View] -->B(Cache)
 ```
 
 ## Feature
-1. Cache: Memory
-1. Loader: Disk、Local、Network
+1. Cache: Memory、Disk
+1. Loader: Local、Network
 1. Decoder: Image、Gif
 1. Processor: Predrawn、Gray
 

@@ -19,11 +19,15 @@ public struct OnlinePreviewView: View {
         public let id: String
         public let liveVideo: [Item]
         let loader: URLImageLoader
+        
         @MainActor public init(url: URL, id: String? = nil, liveVideo: [Item] = []) {
             self.url = url
             self.id = id ?? url.id
             self.liveVideo = liveVideo
-            self.loader = URLImageLoader(.init(url, size: .original, key: self.id), liveVideo: liveVideo.first.map { .init($0.url, size: .original, key: $0.id) })
+            self.loader = URLImageLoader(
+                .init(url, size: .original, key: self.id),
+                liveVideo: liveVideo.first.map { .init($0.url, size: .original, key: $0.id) }
+            )
         }
     }
     
@@ -31,6 +35,7 @@ public struct OnlinePreviewView: View {
         public var id: String { currentID ?? "" }
         var currentID: Item.ID?
         let items: [Item]
+        
         public init(current: Item.ID, items: [Item]) {
             self.items = items
             self.currentID = current
@@ -50,18 +55,17 @@ public struct OnlinePreviewView: View {
         ZStack {
             Color.black.opacity(opacity).ignoresSafeArea()
             
-            // 外层 ScrollView：处理左右翻页
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 0) {
                     ForEach(state.items) { item in
                         ZoomableImageCell(item: item)
-                            .containerRelativeFrame(.horizontal) // 撑满屏幕宽
+                            .containerRelativeFrame(.horizontal)
                     }
                 }
                 .scrollTargetLayout()
             }
             .scrollPosition(id: $state.currentID)
-            .scrollTargetBehavior(.viewAligned) // 像 TabView 一样的翻页感
+            .scrollTargetBehavior(.viewAligned)
             .offset(y: offset)
             .scaleEffect(1 - (offset / 1000))
         }
@@ -76,8 +80,7 @@ public struct OnlinePreviewView: View {
                     }
                 }
                 .onEnded { value in
-                    let dy = value.translation.height
-                    if dy > 150 {
+                    if value.translation.height > 150 {
                         dismiss()
                     } else {
                         withAnimation(.spring()) {
@@ -98,15 +101,14 @@ extension URL: @retroactive Identifiable {
 private struct ZoomableImageCell: View {
     let item: OnlinePreviewView.Item
     var loader: URLImageLoader { item.loader }
-    @ObservedObject private var result: ImageResultObservableObject
+    @ObservedObject private var result: ImageResult
+    
     init(item: OnlinePreviewView.Item) {
         self.item = item
         result = item.loader.result
     }
     
-    // 1. 当前稳定的缩放倍数
     @State private var scale: CGFloat = 1.0
-    // 2. 手势进行中的临时缩放增量
     @GestureState private var gestureScale: CGFloat = 1.0
     
     var body: some View {
@@ -116,6 +118,7 @@ private struct ZoomableImageCell: View {
                 case .success(let image):
                     let totalScale = scale * gestureScale
                     Group {
+                        #if os(iOS)
                         if let livePhoto = result.livePhoto {
                             LivePhotoView(livePhoto: livePhoto)
                                 .overlay(alignment: .bottomTrailing) {
@@ -123,30 +126,27 @@ private struct ZoomableImageCell: View {
                                         .padding(10)
                                 }
                         } else {
-                            Group {
-                                #if os(iOS)
-                                iOSImageView(image, loader: loader)
-                                #else
-                                buildImageView(image, loader: loader)
-                                #endif
-                            }
-                            .overlay(alignment: .bottomTrailing) {
-                                if let first = item.liveVideo.first {
-                                    Button {
-                                        loader.loadLivePhoto()
-                                    } label: {
-                                        if loader.result.livePhotoLoading {
-                                            ProgressView()
-                                                .padding(10)
-                                        } else {
-                                            Image(systemName: "livephoto")
-                                                .padding(10)
+                            iOSImageView(image, loader: loader)
+                                .overlay(alignment: .bottomTrailing) {
+                                    if item.liveVideo.first != nil {
+                                        Button {
+                                            loader.loadLivePhoto()
+                                        } label: {
+                                            if loader.result.livePhotoLoading {
+                                                ProgressView()
+                                                    .padding(10)
+                                            } else {
+                                                Image(systemName: "livephoto")
+                                                    .padding(10)
+                                            }
                                         }
+                                        .disabled(loader.result.livePhotoLoading)
                                     }
-                                    .disabled(loader.result.livePhotoLoading)
                                 }
-                            }
                         }
+                        #else
+                        buildImageView(image, loader: loader)
+                        #endif
                     }
                     .frame(width: proxy.size.width, height: proxy.size.width / image.size.width * image.size.height)
                     .scaleEffect(totalScale)
@@ -163,7 +163,6 @@ private struct ZoomableImageCell: View {
                             .onEnded { value in
                                 withAnimation(.spring()) {
                                     scale *= value.magnification
-                                    // 限制缩放范围：最小 1 倍，最大 4 倍
                                     scale = min(max(scale, 1.0), scale * 4.0)
                                 }
                             }
@@ -179,7 +178,6 @@ private struct ZoomableImageCell: View {
                 }
             }
         }
-        // 实现可以拖动查看图片边缘
         .scrollDisabled(scale <= 1.0)
         .task(id: "\(loader.request.size)-\(loader.request.processors.rawValue)") {
             if case .success = result.value { } else {
@@ -189,6 +187,7 @@ private struct ZoomableImageCell: View {
     }
 }
 
+#if os(iOS)
 struct LivePhotoView: UIViewRepresentable {
     let livePhoto: PHLivePhoto
 
@@ -203,3 +202,4 @@ struct LivePhotoView: UIViewRepresentable {
         uiView.livePhoto = livePhoto
     }
 }
+#endif

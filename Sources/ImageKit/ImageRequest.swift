@@ -1,5 +1,5 @@
 //
-//  Request.swift
+//  ImageRequest.swift
 //  ImageKit
 //
 //  Created by saucymqin on 2018/7/9.
@@ -18,8 +18,8 @@ public struct RequestProcessor: OptionSet {
 }
 
 public struct RequestCache: OptionSet {
-    public static let Memory = RequestCache(rawValue: 1 << 0)
-    public static let Disk = RequestCache(rawValue: 1 << 1)
+    public static let memory = RequestCache(rawValue: 1 << 0)
+    public static let disk = RequestCache(rawValue: 1 << 1)
     
     public let rawValue: Int
     public init(rawValue: Int) {
@@ -36,14 +36,14 @@ public struct ImageRequest {
         public var width: CGFloat? {
             switch self {
             case .original: nil
-            case .absolute(let cGSize): cGSize.width
-            case .width(let cGFloat, _): cGFloat
+            case .absolute(let size): size.width
+            case .width(let width, _): width
             }
         }
         
         public var height: CGFloat? {
             switch self {
-            case .absolute(let cGSize): cGSize.height
+            case .absolute(let size): size.height
             case .width, .original: nil
             }
         }
@@ -51,34 +51,34 @@ public struct ImageRequest {
         public var defaultHeight: CGFloat? {
             switch self {
             case .original: nil
-            case .absolute(let cGSize): cGSize.height
-            case .width(_, let h): h
+            case .absolute(let size): size.height
+            case .width(_, let height): height
             }
         }
     }
     
     public actor Context {
         public static let `default` = Context()
-        public nonisolated let disk: DiskLoader
-        public nonisolated let decoder: [DecoderProtocol]
-        public nonisolated let cacher: [CacheProtocol]
-        public nonisolated let processor: [ProcessorProtocol]
-        public nonisolated let loader: [LoaderProtocol]
+        public nonisolated let disk: DiskCache
+        public nonisolated let decoders: [ImageDecoder]
+        public nonisolated let caches: [ImageCache]
+        public nonisolated let processors: [ImageProcessor]
+        public nonisolated let loaders: [DataLoader]
         #if DEBUG
         let tag: Int // 1: hidden image
         #endif
         var taskMap = [Int: Task<KKImage, Error>]()
-        public init(disk: DiskLoader = .init(),
-                    decoder: [DecoderProtocol] = [SystemDecoder()],
-                    cacher: [CacheProtocol] = [MemoryCache.shared],
-                    processor: [ProcessorProtocol] = [GrayProcessor(), PredrawnProcessor()],
-                    loader: [LoaderProtocol] = [LocalLoader(), NetworkLoader()],
+        public init(disk: DiskCache = .init(),
+                    decoders: [ImageDecoder] = [SystemDecoder()],
+                    caches: [ImageCache] = [MemoryCache.shared],
+                    processors: [ImageProcessor] = [GrayProcessor(), PredrawnProcessor()],
+                    loaders: [DataLoader] = [LocalLoader(), NetworkLoader()],
                     tag: Int = 0) {
             self.disk = disk
-            self.decoder = decoder
-            self.cacher = cacher
-            self.processor = processor
-            self.loader = loader
+            self.decoders = decoders
+            self.caches = caches
+            self.processors = processors
+            self.loaders = loaders
             #if DEBUG
             self.tag = tag
             #endif
@@ -103,10 +103,10 @@ public struct ImageRequest {
                 isGif: Bool? = nil,
                 info: Any? = nil,
                 asset: PHAsset? = nil,
-                processors: RequestProcessor = .preDrawn,
-                caches: RequestCache = [.Memory, .Disk],
+                processors: RequestProcessor = .predrawn,
+                caches: RequestCache = [.memory, .disk],
                 context: Context = .default) {
-        self.key = key ?? ImageRequest.cacheKeyFor(url)
+        self.key = key ?? ImageRequest.cacheKey(for: url)
         self.url = url
         self.size = size
         self.mode = mode
@@ -122,12 +122,11 @@ public struct ImageRequest {
         }
     }
     
-    static public func cacheKeyFor(_ url: URL) -> String {
+    public static func cacheKey(for url: URL) -> String {
         var ext = url.pathExtension
-        if ext.count == 0 {
+        if ext.isEmpty {
             ext = "jpg"
         }
-        
         return url.absoluteString.md5 + ".\(ext)"
     }
     
@@ -137,59 +136,42 @@ public struct ImageRequest {
 }
 
 extension ImageRequest {
-    // MARK: - Decoder
     func decode(data: Data) throws -> KKImage {
-        for operation in context.decoder {
-            if operation.isValid(request: self) == true {
-                return try operation.decoder(request: self, data: data)
-            }
+        for decoder in context.decoders where decoder.isValid(request: self) {
+            return try decoder.decode(request: self, data: data)
         }
-        
         throw IKError.decoderIsEmpty
     }
     
-    // MARK: - Cacher
     @MainActor func cachedImage() throws -> KKImage? {
-        for operation in context.cacher {
-            if operation.isValid(request: self) == true {
-                if let image = try operation.imageFor(request: self) {
-                    return image
-                }
+        for cache in context.caches where cache.isValid(request: self) {
+            if let image = try cache.image(for: self) {
+                return image
             }
         }
         return nil
     }
     
     @MainActor func cache(image: KKImage) {
-        for operation in context.cacher {
-            if operation.isValid(request: self) {
-                operation.cache(image: image, for: self)
-            }
+        for cache in context.caches where cache.isValid(request: self) {
+            cache.cache(image, for: self)
         }
     }
     
-    // MARK: - Processor
     func process(_ input: KKImage) -> KKImage {
-        var img: KKImage = input
-        for operation in context.processor {
-            if operation.isValid(request: self) == true {
-                img = operation.processor(request: self, input: img)
-            }
+        var image = input
+        for processor in context.processors where processor.isValid(request: self) {
+            image = processor.process(request: self, input: image)
         }
-        
-        return img
+        return image
     }
     
-    // MARK: - Loader
-    func load() async throws -> ResultItem {
-        for operation in context.loader {
-            if operation.isValid(request: self) == true {
-                if let res = await operation.loadFor(request: self) {
-                    return res
-                }
+    func load() async throws -> LoadResult {
+        for loader in context.loaders where loader.isValid(request: self) {
+            if let result = await loader.load(request: self) {
+                return result
             }
         }
-        
         throw IKError.loaderIsEmpty
     }
 }
@@ -202,21 +184,21 @@ private extension ImageRequest.Context {
         
         let key = request.cacheKey()
         let task: Task<KKImage, Error>
-        if let old = taskMap[key] {
-            task = old
+        if let existing = taskMap[key] {
+            task = existing
         } else {
             task = Task {
-                let res = try await request.load()
-                switch res {
+                let result = try await request.load()
+                switch result {
                 case .image(let image):
-                    let result = request.process(image)
-                    await request.cache(image: result)
-                    return result
+                    let processed = request.process(image)
+                    await request.cache(image: processed)
+                    return processed
                 case .data(let data):
                     let image = try request.decode(data: data)
-                    let result = request.process(image)
-                    await request.cache(image: result)
-                    return result
+                    let processed = request.process(image)
+                    await request.cache(image: processed)
+                    return processed
                 }
             }
             taskMap[key] = task
@@ -234,13 +216,8 @@ private extension ImageRequest.Context {
 
 extension ImageRequest {
     public func send() async throws -> KKImage {
-        return try await context.load(request: self)
+        try await context.load(request: self)
     }
-}
-
-public enum ResultItem {
-    case image(KKImage)
-    case data(Data)
 }
 
 public enum IKError: Error {
@@ -250,26 +227,12 @@ public enum IKError: Error {
     case decoderImageIsNil
 }
 
-func logInfo(fileName: String = #file, funcName: String = #function, lineNum: Int = #line, _ items: Any..., separator: String = " ") {
-    let stringItems = items.map{ String(describing: $0) }
-    let combinedString = stringItems.joined(separator: separator)
-    print("[\((fileName as NSString).lastPathComponent):\(lineNum), \(funcName)]: \(combinedString)")
-}
-
-func logDebug(fileName: String = #file, funcName: String = #function, lineNum: Int = #line, _ text: @autoclosure () -> String) {
-    #if DEBUG
-    print("[\((fileName as NSString).lastPathComponent):\(lineNum), \(funcName)]: \(text())")
-    #endif
-}
-
 extension String {
     var md5: String {
         guard let data = data(using: .utf8) else {
             return self
         }
-        //        let digest = SHA256.hash(data: data)
-        //        let digest = Insecure.SHA1.hash(data: data)
         let digest = Insecure.MD5.hash(data: data)
-        return digest.map { String(format: "%02x" , $0 ) }.joined()
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 }

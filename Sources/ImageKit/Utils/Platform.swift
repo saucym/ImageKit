@@ -31,7 +31,9 @@ public typealias KKView = NSView
 public typealias KKViewController = NSViewController
 public typealias KKViewRepresentable = NSViewRepresentable
 public typealias KKViewControllerRepresentable = NSViewControllerRepresentable
-extension NSImage: @unchecked Sendable { }
+extension NSImage: @unchecked @retroactive Sendable { }
+
+let screenScale = NSScreen.main?.backingScaleFactor ?? 1
 
 #else
 
@@ -57,6 +59,8 @@ public typealias KKView = UIView
 public typealias KKViewController = UIViewController
 public typealias KKViewRepresentable = UIViewRepresentable
 public typealias KKViewControllerRepresentable = UIViewControllerRepresentable
+
+let screenScale = UIScreen.main.scale
 
 #endif
 
@@ -116,11 +120,11 @@ extension KKImage {
     }
     
     var cgImage: CGImage? {
-        return cgImage(forProposedRect: nil, context: nil, hints: nil)
+        cgImage(forProposedRect: nil, context: nil, hints: nil)
     }
     
     var scale: CGFloat {
-        return 1
+        1
     }
 }
 #endif

@@ -9,15 +9,15 @@ import Foundation
 
 public class NetworkLoader: NSObject { }
 
-extension NetworkLoader: LoaderProtocol {
+extension NetworkLoader: DataLoader {
     public func isValid(request: ImageRequest) -> Bool {
-        return request.url.scheme == "http" || request.url.scheme == "https"
+        request.url.scheme == "http" || request.url.scheme == "https"
     }
     
-    public func loadFor(request: ImageRequest) async -> ResultItem? {
+    public func load(request: ImageRequest) async -> LoadResult? {
         let needCache = request.context.disk.isValid(request: request)
-        if needCache, let res = await request.context.disk.loadFor(request: request) {
-            return res
+        if needCache, let result = await request.context.disk.load(request: request) {
+            return result
         }
         do {
             let (data, _) = try await URLSession.shared.data(from: request.url)
