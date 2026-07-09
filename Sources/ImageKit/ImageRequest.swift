@@ -133,6 +133,15 @@ public struct ImageRequest {
     public func localPath() -> URL {
         context.disk.localPath(self)
     }
+    
+    /// Memory-cache identity: url key + display width + processors.
+    func cacheKey(width: CGFloat? = nil) -> Int {
+        var hasher = Hasher()
+        hasher.combine(key)
+        hasher.combine(width ?? size.width)
+        hasher.combine(processors.rawValue)
+        return hasher.finalize()
+    }
 }
 
 extension ImageRequest {

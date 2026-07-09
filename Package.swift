@@ -26,5 +26,8 @@ let package = Package(
         .target(
             name: "ImageKitExample",
             dependencies: ["ImageKit"]),
+        .testTarget(
+            name: "ImageKitTests",
+            dependencies: ["ImageKit"]),
     ]
 )

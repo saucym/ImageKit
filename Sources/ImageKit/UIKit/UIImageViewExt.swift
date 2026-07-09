@@ -103,14 +103,6 @@ extension KKImageView {
 }
 
 extension ImageRequest {
-    func cacheKey(width: CGFloat? = nil) -> Int {
-        var hasher = Hasher()
-        hasher.combine(key)
-        hasher.combine(width ?? size.width)
-        hasher.combine(processors.rawValue)
-        return hasher.finalize()
-    }
-    
     init(_ url: URL,
          _ imageView: KKImageView,
          key: String? = nil,

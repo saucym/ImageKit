@@ -7,6 +7,9 @@
 
 import Foundation
 
+/// Disk-backed raw data storage for network downloads.
+/// Not an `ImageCache` (decoded images live in memory) and not a `DataLoader`
+/// (loaders decide *where* to fetch; this only persists bytes).
 public struct DiskCache: Hashable {
     public let dir: URL
     private let splitSubDir: Bool
@@ -22,35 +25,11 @@ public struct DiskCache: Hashable {
             }
         }
     }
-}
-
-extension DiskCache: DataLoader {
-    public func isValid(request: ImageRequest) -> Bool {
+    
+    public func isEnabled(for request: ImageRequest) -> Bool {
         request.caches.contains(.disk)
     }
     
-    public func load(request: ImageRequest) async -> LoadResult? {
-        let url = localPath(request)
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            return nil
-        }
-        
-        let videoSuffix: Set = ["gif", "mp4", "mov"]
-        if videoSuffix.contains(url.pathExtension.lowercased()) {
-            do {
-                let data = try Data(contentsOf: url)
-                return .data(data)
-            } catch {
-                logInfo(error)
-            }
-        } else if let image = KKImage(contentsOfFile: url.path) {
-            return .image(image)
-        }
-        return nil
-    }
-}
-
-extension DiskCache {
     public func localPath(_ key: String) -> URL {
         if splitSubDir {
             let subName = key.prefix(2)
@@ -65,7 +44,28 @@ extension DiskCache {
         localPath(request.key)
     }
     
-    public func cache(data: Data, for request: ImageRequest) {
+    public func load(_ request: ImageRequest) -> LoadResult? {
+        let url = localPath(request)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return nil
+        }
+        
+        let binarySuffix: Set = ["gif", "mp4", "mov"]
+        if binarySuffix.contains(url.pathExtension.lowercased()) {
+            do {
+                return .data(try Data(contentsOf: url))
+            } catch {
+                logInfo(error)
+                return nil
+            }
+        }
+        if let image = KKImage(contentsOfFile: url.path) {
+            return .image(image)
+        }
+        return nil
+    }
+    
+    public func store(_ data: Data, for request: ImageRequest) {
         guard !data.isEmpty else { return }
         let url = localPath(request)
         do {
@@ -73,7 +73,7 @@ extension DiskCache {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
             try data.write(to: url)
         } catch {
-            logInfo("DiskCache.cache.error:\(error)")
+            logInfo("DiskCache.store.error:\(error)")
         }
     }
 }

@@ -15,14 +15,15 @@ extension NetworkLoader: DataLoader {
     }
     
     public func load(request: ImageRequest) async -> LoadResult? {
-        let needCache = request.context.disk.isValid(request: request)
-        if needCache, let result = await request.context.disk.load(request: request) {
-            return result
+        let disk = request.context.disk
+        let useDisk = disk.isEnabled(for: request)
+        if useDisk, let cached = disk.load(request) {
+            return cached
         }
         do {
             let (data, _) = try await URLSession.shared.data(from: request.url)
-            if needCache {
-                request.context.disk.cache(data: data, for: request)
+            if useDisk {
+                disk.store(data, for: request)
             }
             logDebug("did load: \(request.key), data: \(ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file))")
             return .data(data)
