@@ -1,0 +1,11 @@
+---
+description: Swift/项目编码规范：可见性、不可变、非空、简洁命名
+alwaysApply: true
+---
+
+# 编码规范
+
+- 访问权限能用 `private` 就不要用 `internal` 或 `public`
+- 变量尽量不可变：能用 `let` 就不要用 `var`
+- 变量尽量定义为非空类型
+- 命名和实现尽量简洁
