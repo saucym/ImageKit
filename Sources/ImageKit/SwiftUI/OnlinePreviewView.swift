@@ -74,6 +74,7 @@ public struct OnlinePreviewView: View {
     
     @State private var state: Source
     @State private var showControls = true
+    @State private var showFullName = false
     private let onMenu: ((MenuItem, Item.ID) -> Void)?
     
     public init(state: Source, onMenu: ((MenuItem, Item.ID) -> Void)? = nil) {
@@ -123,6 +124,11 @@ public struct OnlinePreviewView: View {
         .statusBarHidden(!showControls)
         .persistentSystemOverlays(showControls ? .automatic : .hidden)
         #endif
+        .alert("文件名", isPresented: $showFullName) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(currentItem?.name ?? "")
+        }
         .simultaneousGesture(
             DragGesture()
                 .onChanged { value in
@@ -155,6 +161,10 @@ public struct OnlinePreviewView: View {
                     .font(.headline)
                     .lineLimit(1)
                     .foregroundStyle(.white)
+                    .contentShape(.rect)
+                    .onTapGesture {
+                        showFullName = true
+                    }
                 Spacer(minLength: 0)
                 ForEach(currentItem?.menus ?? [], id: \.self) { menu in
                     ControllButton(systemName: menu.systemName) {
