@@ -18,12 +18,20 @@ public struct OnlinePreviewView: View {
         public let url: URL
         public let id: String
         public let liveVideo: [Item]
+        public var name: String
+        public var menus: [MenuItem]
         let loader: URLImageLoader
         
-        @MainActor public init(url: URL, id: String? = nil, liveVideo: [Item] = []) {
+        @MainActor public init(url: URL,
+                               id: String? = nil,
+                               liveVideo: [Item] = [],
+                               name: String = "",
+                               menus: [MenuItem] = []) {
             self.url = url
             self.id = id ?? url.id
             self.liveVideo = liveVideo
+            self.name = name
+            self.menus = menus
             self.loader = URLImageLoader(
                 .init(url, size: .original, key: self.id),
                 liveVideo: liveVideo.first.map { .init($0.url, size: .original, key: $0.id) }
@@ -31,10 +39,32 @@ public struct OnlinePreviewView: View {
         }
     }
     
+    public enum MenuItem: Hashable {
+        case favorite(Bool)
+        case delete
+        case jumpToOriginalDir
+        
+        public var systemName: String {
+            switch self {
+            case .favorite(let bool): bool ? "star.fill" : "star"
+            case .delete: "trash"
+            case .jumpToOriginalDir: "folder"
+            }
+        }
+        
+        var isFavorite: Bool {
+            if case .favorite = self {
+                true
+            } else {
+                false
+            }
+        }
+    }
+    
     public struct Source: Equatable, Identifiable {
         public var id: String { currentID ?? "" }
-        var currentID: Item.ID?
-        let items: [Item]
+        public var currentID: Item.ID?
+        public var items: [Item]
         
         public init(current: Item.ID, items: [Item]) {
             self.items = items
@@ -43,13 +73,22 @@ public struct OnlinePreviewView: View {
     }
     
     @State private var state: Source
-    public init(state: Source) {
+    @State private var showControls = true
+    private let onMenu: ((MenuItem, Item.ID) -> Void)?
+    
+    public init(state: Source, onMenu: ((MenuItem, Item.ID) -> Void)? = nil) {
         _state = .init(initialValue: state)
+        self.onMenu = onMenu
     }
     
     @Environment(\.dismiss) private var dismiss
     @State private var offset: CGFloat = 0
     @State private var opacity: Double = 1.0
+    
+    private var currentItem: Item? {
+        guard let currentID = state.currentID else { return state.items.first }
+        return state.items.first { $0.id == currentID } ?? state.items.first
+    }
     
     public var body: some View {
         ZStack {
@@ -58,8 +97,12 @@ public struct OnlinePreviewView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 0) {
                     ForEach(state.items) { item in
-                        ZoomableImageCell(item: item)
-                            .containerRelativeFrame(.horizontal)
+                        ZoomableImageCell(item: item) {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                showControls.toggle()
+                            }
+                        }
+                        .containerRelativeFrame(.horizontal)
                     }
                 }
                 .scrollTargetLayout()
@@ -68,9 +111,18 @@ public struct OnlinePreviewView: View {
             .scrollTargetBehavior(.viewAligned)
             .offset(y: offset)
             .scaleEffect(1 - (offset / 1000))
+            .ignoresSafeArea()
+            
+            if showControls {
+                controllerView
+            }
         }
-        .ignoresSafeArea()
         .presentationBackground(.clear)
+        .preferredColorScheme(.dark)
+        #if os(iOS)
+        .statusBarHidden(!showControls)
+        .persistentSystemOverlays(showControls ? .automatic : .hidden)
+        #endif
         .simultaneousGesture(
             DragGesture()
                 .onChanged { value in
@@ -91,6 +143,74 @@ public struct OnlinePreviewView: View {
                 }
         )
     }
+    
+    @ViewBuilder private var controllerView: some View {
+        VStack {
+            HStack(spacing: 20) {
+                ControllButton(systemName: "xmark") {
+                    dismiss()
+                }
+                Spacer(minLength: 0)
+                Text(currentItem?.name ?? "")
+                    .font(.headline)
+                    .lineLimit(1)
+                    .foregroundStyle(.white)
+                Spacer(minLength: 0)
+                ForEach(currentItem?.menus ?? [], id: \.self) { menu in
+                    ControllButton(systemName: menu.systemName) {
+                        handleMenu(menu)
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+            .frame(minHeight: 44)
+            .background(
+                LinearGradient(
+                    colors: [Color.black.opacity(0.45), Color.black.opacity(0.0)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            
+            Spacer()
+                .allowsHitTesting(false)
+        }
+        .transition(.opacity)
+    }
+    
+    private func handleMenu(_ menu: MenuItem) {
+        guard let item = currentItem else { return }
+        switch menu {
+        case .favorite(let old):
+            if let index = state.items.firstIndex(where: { $0.id == item.id }),
+               let menuIndex = state.items[index].menus.firstIndex(where: { $0.isFavorite }) {
+                state.items[index].menus[menuIndex] = .favorite(!old)
+            }
+            onMenu?(menu, item.id)
+        case .delete:
+            onMenu?(menu, item.id)
+            removeCurrentItem()
+        case .jumpToOriginalDir:
+            onMenu?(menu, item.id)
+            dismiss()
+        }
+    }
+    
+    private func removeCurrentItem() {
+        guard let item = currentItem,
+              let index = state.items.firstIndex(where: { $0.id == item.id }) else {
+            dismiss()
+            return
+        }
+        state.items.remove(at: index)
+        if state.items.isEmpty {
+            dismiss()
+            return
+        }
+        let nextIndex = min(index, state.items.count - 1)
+        state.currentID = state.items[nextIndex].id
+    }
 }
 
 extension URL: @retroactive Identifiable {
@@ -98,13 +218,31 @@ extension URL: @retroactive Identifiable {
 }
 
 @available(iOS 17.0, macOS 14.0, *)
+private struct ControllButton: View {
+    let systemName: String
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 36, height: 36)
+                .background(.black.opacity(0.35), in: Circle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+@available(iOS 17.0, macOS 14.0, *)
 private struct ZoomableImageCell: View {
     let item: OnlinePreviewView.Item
+    let onSingleTap: () -> Void
     var loader: URLImageLoader { item.loader }
     @ObservedObject private var result: ImageResult
     
-    init(item: OnlinePreviewView.Item) {
+    init(item: OnlinePreviewView.Item, onSingleTap: @escaping () -> Void) {
         self.item = item
+        self.onSingleTap = onSingleTap
         result = item.loader.result
     }
     
@@ -155,6 +293,9 @@ private struct ZoomableImageCell: View {
                             scale = (scale > 1.0) ? 1.0 : 2.5
                         }
                     }
+                    .onTapGesture(count: 1) {
+                        onSingleTap()
+                    }
                     .gesture(
                         MagnifyGesture()
                             .updating($gestureScale) { value, state, _ in
@@ -171,10 +312,12 @@ private struct ZoomableImageCell: View {
                     ProgressView()
                         .frame(width: loader.request.size.width, height: loader.request.size.defaultHeight)
                         .border(color: .gray)
+                        .onTapGesture(perform: onSingleTap)
                 case .failure:
                     Text("error")
                         .frame(width: loader.request.size.width, height: loader.request.size.defaultHeight)
                         .border(color: .red)
+                        .onTapGesture(perform: onSingleTap)
                 }
             }
         }
