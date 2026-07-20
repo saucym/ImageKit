@@ -21,17 +21,20 @@ public struct OnlinePreviewView: View {
         public var name: String
         public var menus: [MenuItem]
         let loader: URLImageLoader
+        let thumbnail: URLImageLoader?
         
         @MainActor public init(url: URL,
                                id: String? = nil,
                                liveVideo: [Item] = [],
                                name: String = "",
-                               menus: [MenuItem] = []) {
+                               menus: [MenuItem] = [],
+                               thumbnail: URLImageLoader? = nil) {
             self.url = url
             self.id = id ?? url.id
             self.liveVideo = liveVideo
             self.name = name
             self.menus = menus
+            self.thumbnail = thumbnail
             self.loader = URLImageLoader(
                 .init(url, size: .original, key: self.id),
                 liveVideo: liveVideo.first.map { .init($0.url, size: .original, key: $0.id) }
@@ -245,38 +248,61 @@ private struct ControllButton: View {
 
 @available(iOS 17.0, macOS 14.0, *)
 private struct ZoomableImageCell: View {
+    private static let emptyThumbnailResult = ImageResult()
+    
     let item: OnlinePreviewView.Item
     let onSingleTap: () -> Void
     var loader: URLImageLoader { item.loader }
     @ObservedObject private var result: ImageResult
+    @ObservedObject private var thumbnailResult: ImageResult
     
     init(item: OnlinePreviewView.Item, onSingleTap: @escaping () -> Void) {
         self.item = item
         self.onSingleTap = onSingleTap
         result = item.loader.result
+        thumbnailResult = item.thumbnail?.result ?? Self.emptyThumbnailResult
     }
     
     @State private var scale: CGFloat = 1.0
     @GestureState private var gestureScale: CGFloat = 1.0
     
+    private var displayImage: KKImage? {
+        if case .success(let image) = result.value {
+            return image
+        }
+        if item.thumbnail != nil, case .success(let image) = thumbnailResult.value {
+            return image
+        }
+        return nil
+    }
+    
+    private var hasOriginal: Bool {
+        if case .success = result.value {
+            return true
+        }
+        return false
+    }
+    
     var body: some View {
         GeometryReader { proxy in
             ScrollView([.horizontal, .vertical], showsIndicators: false) {
-                switch result.value {
-                case .success(let image):
+                if let image = displayImage {
                     let totalScale = scale * gestureScale
+                    let height = max(proxy.size.width / max(image.size.width, 1) * image.size.height, 1)
                     Group {
                         #if os(iOS)
-                        if let livePhoto = result.livePhoto {
+                        if hasOriginal, let livePhoto = result.livePhoto {
                             LivePhotoView(livePhoto: livePhoto)
                                 .overlay(alignment: .bottomTrailing) {
                                     Image(systemName: "livephoto")
                                         .padding(10)
                                 }
                         } else {
-                            iOSImageView(image, loader: loader)
+                            image.swiftUIView
+                                .resizable()
+                                .scaledToFit()
                                 .overlay(alignment: .bottomTrailing) {
-                                    if item.liveVideo.first != nil {
+                                    if hasOriginal, item.liveVideo.first != nil {
                                         Button {
                                             loader.loadLivePhoto()
                                         } label: {
@@ -293,10 +319,12 @@ private struct ZoomableImageCell: View {
                                 }
                         }
                         #else
-                        buildImageView(image, loader: loader)
+                        image.swiftUIView
+                            .resizable()
+                            .scaledToFit()
                         #endif
                     }
-                    .frame(width: proxy.size.width, height: proxy.size.width / image.size.width * image.size.height)
+                    .frame(width: proxy.size.width, height: height)
                     .scaleEffect(totalScale)
                     .onTapGesture(count: 2) {
                         withAnimation(.spring()) {
@@ -318,25 +346,36 @@ private struct ZoomableImageCell: View {
                                 }
                             }
                     )
-                case .empty:
-                    ProgressView()
-                        .frame(width: loader.request.size.width, height: loader.request.size.defaultHeight)
-                        .border(color: .gray)
-                        .onTapGesture(perform: onSingleTap)
-                case .failure:
+                } else if case .failure = result.value, item.thumbnail == nil || !isThumbnailSuccess {
                     Text("error")
-                        .frame(width: loader.request.size.width, height: loader.request.size.defaultHeight)
-                        .border(color: .red)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .foregroundStyle(.white)
+                        .onTapGesture(perform: onSingleTap)
+                } else {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .onTapGesture(perform: onSingleTap)
                 }
             }
         }
         .scrollDisabled(scale <= 1.0)
-        .task(id: "\(loader.request.size)-\(loader.request.processors.rawValue)") {
-            if case .success = result.value { } else {
+        .task(id: item.id) {
+            if let thumbnail = item.thumbnail {
+                if case .success = thumbnail.result.value { } else {
+                    await thumbnail.loadImage()
+                }
+            }
+            if case .success = loader.result.value { } else {
                 await loader.loadImage()
             }
         }
+    }
+    
+    private var isThumbnailSuccess: Bool {
+        if case .success = thumbnailResult.value {
+            return true
+        }
+        return false
     }
 }
 
