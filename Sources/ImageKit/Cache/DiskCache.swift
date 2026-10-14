@@ -50,19 +50,12 @@ public struct DiskCache: Hashable {
             return nil
         }
         
-        let binarySuffix: Set = ["gif", "mp4", "mov"]
-        if binarySuffix.contains(url.pathExtension.lowercased()) {
-            do {
-                return .data(try Data(contentsOf: url))
-            } catch {
-                logInfo(error)
-                return nil
-            }
+        do {
+            return .data(try Data(contentsOf: url))
+        } catch {
+            logInfo(error)
+            return nil
         }
-        if let image = KKImage(contentsOfFile: url.path) {
-            return .image(image)
-        }
-        return nil
     }
     
     public func store(_ data: Data, for request: ImageRequest) {
@@ -71,7 +64,7 @@ public struct DiskCache: Hashable {
         do {
             let dir = url.deletingLastPathComponent()
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
-            try data.write(to: url)
+            try data.write(to: url, options: .atomic)
         } catch {
             logInfo("DiskCache.store.error:\(error)")
         }

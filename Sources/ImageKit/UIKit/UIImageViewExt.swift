@@ -7,6 +7,7 @@
 
 import Photos
 import Foundation
+import SwiftUI
 
 #if os(OSX)
 import AppKit
@@ -18,14 +19,20 @@ private struct AssociatedKeys {
     static var request = 1
 }
 
-private class ViewLoader {
-    init(request: ImageRequest, task: Task<(), Never>) {
+private final class ViewLoader {
+    init(id: UUID, request: ImageRequest, task: Task<(), Never>) {
+        self.id = id
         self.request = request
         self.task = task
     }
-    
+
+    let id: UUID
     let request: ImageRequest
     let task: Task<(), Never>
+
+    deinit {
+        task.cancel()
+    }
 }
 
 public extension KKImageView {
@@ -47,20 +54,30 @@ public extension KKImageView {
     
     func setImage(request: ImageRequest) {
         KKImageView.swizzleMethod
+        cancelImageLoad()
         image = nil
-        
-        let task = Task { @MainActor in
+
+        let id = UUID()
+        let task = Task { @MainActor [weak self] in
             do {
                 let image = try await request.send()
-                if ik_loader?.request.cacheKey() == request.cacheKey() {
-                    self.image = image
-                }
+                guard !Task.isCancelled,
+                      let self,
+                      ik_loader?.id == id else { return }
+                self.image = image
+            } catch is CancellationError {
             } catch {
                 logInfo(error.localizedDescription)
             }
         }
-        
-        ik_loader = ViewLoader(request: request, task: task)
+
+        ik_loader = ViewLoader(id: id, request: request, task: task)
+    }
+
+    func cancelImageLoad() {
+        let loader = ik_loader
+        ik_loader = nil
+        loader?.task.cancel()
     }
 }
 
@@ -89,10 +106,9 @@ extension KKImageView {
             let currentSize = CGSize(width: request.size.width ?? 0, height: request.size.height ?? bounds.height)
             guard !currentSize.equalTo(bounds.size) else { return }
             
-            loader.task.cancel()
             switch request.size {
             case .original:
-                setImage(request: request)
+                break
             case .absolute:
                 setImage(request: request.makeRequest(size: .absolute(bounds.size)))
             case .width:
@@ -111,24 +127,20 @@ extension ImageRequest {
          isGif: Bool? = nil,
          asset: PHAsset? = nil,
          context: Context = .default) {
-        self.key = key ?? ImageRequest.cacheKey(for: url)
-        self.url = url
-        self.size = .absolute(imageView.bounds.size)
         #if os(iOS)
-        self.mode = imageView.contentMode == .scaleAspectFill ? .fill : .fit
+        let mode: ContentMode = imageView.contentMode == .scaleAspectFill ? .fill : .fit
         #else
-        self.mode = .fill
+        let mode: ContentMode = .fill
         #endif
-        self.info = nil
-        self.asset = asset
-        self.processors = processors
-        self.caches = caches
-        self.context = context
-        if let isGif {
-            self.isGif = isGif
-        } else {
-            self.isGif = url.pathExtension.lowercased() == "gif"
-        }
+        self.init(url,
+                  size: .absolute(imageView.bounds.size),
+                  mode: mode,
+                  key: key,
+                  isGif: isGif,
+                  asset: asset,
+                  processors: processors,
+                  caches: caches,
+                  context: context)
     }
     
     public func makeRequest(size newSize: Size) -> ImageRequest {
@@ -141,6 +153,7 @@ extension ImageRequest {
                      asset: asset,
                      processors: processors,
                      caches: caches,
-                     context: context)
+                     context: context,
+                     animation: animation)
     }
 }

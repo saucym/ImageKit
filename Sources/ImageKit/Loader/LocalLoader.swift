@@ -31,40 +31,46 @@ extension LocalLoader: DataLoader {
     }
     
     public func load(request: ImageRequest) async -> LoadResult? {
+        do {
+            return try await loadResult(request: request)
+        } catch {
+            logInfo(error.localizedDescription)
+            return nil
+        }
+    }
+
+    public func loadResult(request: ImageRequest) async throws -> LoadResult? {
+        try Task.checkCancellation()
+        let result: LoadResult?
         if request.url.isFileURL {
-            do {
-                let data = try Data(contentsOf: request.url)
-                return .data(data)
-            } catch {
-                logInfo(error.localizedDescription)
-                return nil
-            }
+            result = .data(try Data(contentsOf: request.url))
         } else if request.url.scheme == "ph" {
             let localIdentifier = request.url.absoluteString.replacingOccurrences(of: "ph://", with: "")
             await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+            try Task.checkCancellation()
             if let asset = PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil).firstObject {
-                return await image(for: asset, size: request.size)
+                result = try await image(for: asset, size: request.size)
+            } else {
+                result = nil
             }
         } else if let asset = request.asset {
-            return await image(for: asset, size: request.size)
+            result = try await image(for: asset, size: request.size)
         } else if request.url.pathExtension.lowercased() == "gif" {
             if let path = Bundle.main.path(forResource: request.url.absoluteString, ofType: nil) {
-                do {
-                    let url = URL(fileURLWithPath: path)
-                    let data = try Data(contentsOf: url)
-                    return .data(data)
-                } catch {
-                    logInfo(error.localizedDescription)
-                    return nil
-                }
+                result = .data(try Data(contentsOf: URL(fileURLWithPath: path)))
+            } else {
+                result = nil
             }
         } else if let image = KKImage(named: request.url.absoluteString) {
-            return .image(image)
+            result = .image(image)
+        } else {
+            result = nil
         }
-        return nil
+        try Task.checkCancellation()
+        return result
     }
     
-    private func image(for asset: PHAsset, size: ImageRequest.Size) async -> LoadResult? {
+    private func image(for asset: PHAsset, size: ImageRequest.Size) async throws -> LoadResult? {
         var targetSize: CGSize
         let mode: PHImageContentMode
         if let width = size.width {
@@ -94,14 +100,76 @@ extension LocalLoader: DataLoader {
         options.resizeMode = .exact
         options.deliveryMode = .highQualityFormat
         options.version = .current
-        return await withCheckedContinuation { continuation in
-            PHImageManager.default().requestImage(for: asset, targetSize: targetSize, contentMode: mode, options: options) { image, _ in
-                if let image {
-                    continuation.resume(returning: .image(image))
-                } else {
-                    continuation.resume(returning: nil)
+        let state = PhotoRequestState()
+        let manager = PHImageManager.default()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                guard state.register(continuation) else { return }
+                let requestID = manager.requestImage(for: asset, targetSize: targetSize, contentMode: mode, options: options) { image, info in
+                    if info?[PHImageCancelledKey] as? Bool == true {
+                        state.finish(.failure(CancellationError()))
+                    } else if let error = info?[PHImageErrorKey] as? Error {
+                        state.finish(.failure(error))
+                    } else if info?[PHImageResultIsDegradedKey] as? Bool != true {
+                        state.finish(.success(image.map(LoadResult.image)))
+                    }
                 }
+                state.setRequestID(requestID, manager: manager)
             }
+        } onCancel: {
+            state.cancel(manager: manager)
+        }
+    }
+}
+
+private final class PhotoRequestState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<LoadResult?, Error>?
+    private var requestID: PHImageRequestID?
+    private var isFinished = false
+
+    func register(_ continuation: CheckedContinuation<LoadResult?, Error>) -> Bool {
+        lock.lock()
+        if isFinished {
+            lock.unlock()
+            continuation.resume(throwing: CancellationError())
+            return false
+        }
+        self.continuation = continuation
+        lock.unlock()
+        return true
+    }
+
+    func setRequestID(_ requestID: PHImageRequestID, manager: PHImageManager) {
+        lock.lock()
+        self.requestID = requestID
+        let isFinished = isFinished
+        lock.unlock()
+        if isFinished {
+            manager.cancelImageRequest(requestID)
+        }
+    }
+
+    func finish(_ result: Result<LoadResult?, Error>) {
+        lock.lock()
+        guard !isFinished else {
+            lock.unlock()
+            return
+        }
+        isFinished = true
+        let continuation = continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume(with: result)
+    }
+
+    func cancel(manager: PHImageManager) {
+        finish(.failure(CancellationError()))
+        lock.lock()
+        let requestID = requestID
+        lock.unlock()
+        if let requestID {
+            manager.cancelImageRequest(requestID)
         }
     }
 }

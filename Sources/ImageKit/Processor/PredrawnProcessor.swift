@@ -8,6 +8,9 @@
 import Foundation
 import CoreGraphics
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 public extension RequestProcessor {
     static let predrawn = RequestProcessor(rawValue: 1 << 1)
@@ -32,15 +35,13 @@ public class PredrawnProcessor: ImageProcessor {
     
     public func process(request: ImageRequest, input: KKImage) -> KKImage {
         #if os(iOS)
-        if let images = input.images, request.isGif != false {
-            var outImages = [KKImage]()
-            for sub in images {
-                if let image = processOne(request: request, input: sub) {
-                    outImages.append(image)
-                }
+        if let images = input.images, !images.isEmpty {
+            if request.animation == .firstFrame {
+                let first = images[0]
+                return processOne(request: request, input: first) ?? first
             }
-            if let image = KKImage.animatedImage(with: outImages, duration: input.duration),
-               outImages.count == images.count {
+            let outImages = images.map { processOne(request: request, input: $0) ?? $0 }
+            if let image = KKImage.animatedImage(with: outImages, duration: input.duration) {
                 return image
             }
         } else if let image = processOne(request: request, input: input) {
@@ -54,71 +55,77 @@ public class PredrawnProcessor: ImageProcessor {
         return input
     }
     
-    private func rectFrom(_ imagePixelSize: CGSize, _ viewPixelSize: CGSize, _ mode: ContentMode, anchorPoint: CGPoint = CGPoint(x: 0.5, y: 0.5)) -> (CGRect, Int, Int) {
-        let imageRatio = imagePixelSize.height / imagePixelSize.width
-        let viewRatio = viewPixelSize.height / viewPixelSize.width
-        var rect = CGRect.zero
-        switch mode {
-        case .fit:
-            let scale = min(viewPixelSize.height / imagePixelSize.height, viewPixelSize.width / imagePixelSize.width, 1)
-            rect.size = CGSize(width: imagePixelSize.width * scale, height: imagePixelSize.height * scale)
-            return (rect, Int(rect.width), Int(rect.height))
-        case .fill:
-            if imageRatio < viewRatio {
-                rect.size = CGSize(width: viewPixelSize.height / imageRatio, height: viewPixelSize.height)
-                rect.origin = CGPoint(x: (viewPixelSize.width - rect.width) * anchorPoint.x, y: 0)
-            } else {
-                rect.size = CGSize(width: viewPixelSize.width, height: viewPixelSize.width * imageRatio)
-                rect.origin = CGPoint(x: 0, y: (viewPixelSize.height - rect.height) * anchorPoint.y)
-            }
-            
-            let scale = min(imagePixelSize.height / viewPixelSize.height, imagePixelSize.width / viewPixelSize.width, 1)
-            if scale < 1 {
-                rect = CGRect(x: rect.origin.x * scale, y: rect.origin.y * scale, width: rect.width * scale, height: rect.height * scale)
-            }
-            return (rect, Int(viewPixelSize.width * scale), Int(viewPixelSize.height * scale))
-        }
-    }
-    
     private func processOne(request: ImageRequest, input: KKImage) -> KKImage? {
-        let imagePixelSize = input.size * input.scale
+        guard let cgImage = input.cgImage else { return nil }
+        #if os(iOS)
+        let isRotated: Bool
+        switch input.imageOrientation {
+        case .left, .leftMirrored, .right, .rightMirrored: isRotated = true
+        default: isRotated = false
+        }
+        let imagePixelSize = CGSize(width: isRotated ? cgImage.height : cgImage.width, height: isRotated ? cgImage.width : cgImage.height)
+        #else
+        let imagePixelSize = CGSize(width: cgImage.width, height: cgImage.height)
+        #endif
         let viewPixelSize: CGSize
-        let width = request.size.width ?? input.size.width
-        if let height = request.size.height {
-            viewPixelSize = CGSize(width: width, height: height) * screenScale
-        } else {
-            viewPixelSize = CGSize(width: width, height: input.size.height / input.size.width * width) * screenScale
-        }
-        guard imagePixelSize.width > viewPixelSize.width || imagePixelSize.height > viewPixelSize.height else {
+        switch request.size {
+        case .original:
             return nil
+        case .absolute(let size):
+            viewPixelSize = size * screenScale
+        case .width(let width, _):
+            viewPixelSize = CGSize(width: width, height: imagePixelSize.height / imagePixelSize.width * width) * screenScale
         }
-        
-        let (rect, contextWidth, contextHeight) = rectFrom(imagePixelSize, viewPixelSize, request.mode)
-        var info: UInt32 = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
-        if let cgImage = input.cgImage {
-            if cgImage.alphaInfo == .premultipliedLast
-                || cgImage.alphaInfo == .premultipliedFirst
-                || cgImage.alphaInfo == .last
-                || cgImage.alphaInfo == .first {
-                info = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.noneSkipFirst.rawValue
-            }
-            
-            let colorSpace = CGColorSpaceCreateDeviceRGB()
-            let bytesWidth = Int(contextWidth * 4)
-            let bytesPerRow = ((bytesWidth + 63) / 64) * 64
-            if let context = CGContext(data: nil, width: contextWidth, height: contextHeight, bitsPerComponent: 8, bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: info) {
-                // Align bytesPerRow to 64 so Core Animation can reuse the bitmap without copying
-                context.draw(cgImage, in: rect)
-                if let newCgImage = context.makeImage() {
-                    #if os(iOS)
-                    return KKImage(cgImage: newCgImage, scale: input.scale, orientation: input.imageOrientation)
-                    #else
-                    return KKImage(cgImage: newCgImage, size: .init(width: newCgImage.width, height: newCgImage.height))
-                    #endif
-                }
-            }
+        guard viewPixelSize.width.isFinite, viewPixelSize.height.isFinite,
+              viewPixelSize.width > 0, viewPixelSize.height > 0 else { return nil }
+
+        let outputSize: CGSize
+        switch request.mode {
+        case .fit:
+            let scale = min(viewPixelSize.width / imagePixelSize.width, viewPixelSize.height / imagePixelSize.height, 1)
+            outputSize = imagePixelSize * scale
+        case .fill:
+            let scale = min(imagePixelSize.width / viewPixelSize.width, imagePixelSize.height / viewPixelSize.height, 1)
+            outputSize = viewPixelSize * scale
         }
-        
-        return KKImage.scaledFrom(input, to: .init(width: contextWidth, height: contextHeight), rect: rect)
+        let contextWidth = max(1, Int(floor(outputSize.width)))
+        let contextHeight = max(1, Int(floor(outputSize.height)))
+        guard contextWidth != Int(imagePixelSize.width) || contextHeight != Int(imagePixelSize.height) else { return nil }
+        let canvasSize = CGSize(width: contextWidth, height: contextHeight)
+        let rect: CGRect
+        switch request.mode {
+        case .fit:
+            rect = CGRect(origin: .zero, size: canvasSize)
+        case .fill:
+            let scale = max(canvasSize.width / imagePixelSize.width, canvasSize.height / imagePixelSize.height)
+            let drawnSize = imagePixelSize * scale
+            rect = CGRect(x: (canvasSize.width - drawnSize.width) / 2, y: (canvasSize.height - drawnSize.height) / 2, width: drawnSize.width, height: drawnSize.height)
+        }
+        let hasAlpha: Bool
+        switch cgImage.alphaInfo {
+        case .first, .last, .premultipliedFirst, .premultipliedLast, .alphaOnly: hasAlpha = true
+        default: hasAlpha = false
+        }
+        let alphaInfo: CGImageAlphaInfo = hasAlpha ? .premultipliedFirst : .noneSkipFirst
+        let info = CGBitmapInfo.byteOrder32Little.rawValue | alphaInfo.rawValue
+        // Align rows so Core Animation can reuse the bitmap without copying.
+        let bytesPerRow = ((contextWidth * 4 + 63) / 64) * 64
+        guard let context = CGContext(data: nil, width: contextWidth, height: contextHeight, bitsPerComponent: 8, bytesPerRow: bytesPerRow, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: info) else { return nil }
+        context.interpolationQuality = .high
+        #if os(iOS)
+        context.translateBy(x: 0, y: canvasSize.height)
+        context.scaleBy(x: 1, y: -1)
+        UIGraphicsPushContext(context)
+        input.draw(in: rect)
+        UIGraphicsPopContext()
+        #else
+        context.draw(cgImage, in: rect)
+        #endif
+        guard let newCgImage = context.makeImage() else { return nil }
+        #if os(iOS)
+        return KKImage(cgImage: newCgImage, scale: input.scale, orientation: .up)
+        #else
+        return KKImage(cgImage: newCgImage, scale: input.scale)
+        #endif
     }
 }

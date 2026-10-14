@@ -33,36 +33,28 @@ extension SystemDecoder: ImageDecoder {
     }
     
     public func decode(request: ImageRequest, data: Data) throws -> KKImage {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+        let options = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, options) else {
             throw IKError.imageSourceCreateError
         }
-        
+
         #if os(iOS)
-        let count = CGImageSourceGetCount(source)
+        let count = request.animation == .firstFrame ? min(CGImageSourceGetCount(source), 1) : CGImageSourceGetCount(source)
         #else
         let count = min(CGImageSourceGetCount(source), 1)
         #endif
-        
-        let image: KKImage?
-        if count == 0 {
-            image = KKImage(data: data, scale: screenScale)
-        } else if count == 1, request.processors.rawValue > 0 {
-            image = KKImage(data: data, scale: screenScale)
-        } else {
-            image = decodeFrames(source: source, count: count)
-        }
-        
-        guard let image else {
+
+        guard let image = decodeFrames(source: source, count: count, request: request) else {
             throw IKError.decoderImageIsNil
         }
         return image
     }
-    
-    private func decodeFrames(source: CGImageSource, count: Int) -> KKImage? {
-        func imageFrom(cgImage: CGImage, properties: NSDictionary?) -> KKImage {
+
+    private func decodeFrames(source: CGImageSource, count: Int, request: ImageRequest) -> KKImage? {
+        func imageFrom(cgImage: CGImage, properties: NSDictionary?, transformed: Bool) -> KKImage {
             #if os(iOS)
             var orientation = KKImage.Orientation.up
-            if let properties,
+            if !transformed, let properties,
                let num = properties[kCGImagePropertyOrientation] as? NSNumber,
                let ori = CGImagePropertyOrientation(rawValue: num.uint32Value) {
                 orientation = KKImage.Orientation(ori)
@@ -73,36 +65,50 @@ extension SystemDecoder: ImageDecoder {
             #endif
         }
         
-        func frameDuration(from gifInfo: NSDictionary?) -> Double {
-            let gifDefaultFrameDuration = 0.100
-            guard let gifInfo else { return gifDefaultFrameDuration }
-            let unclampedDelayTime = gifInfo[kCGImagePropertyGIFUnclampedDelayTime as String] as? NSNumber
-            let delayTime = gifInfo[kCGImagePropertyGIFDelayTime as String] as? NSNumber
+        func frameDuration(from properties: NSDictionary?) -> Double {
+            let defaultFrameDuration = 0.100
+            let gifInfo = properties?[kCGImagePropertyGIFDictionary as String] as? NSDictionary
+            let pngInfo = properties?[kCGImagePropertyPNGDictionary as String] as? NSDictionary
+            let unclampedDelayTime = (gifInfo?[kCGImagePropertyGIFUnclampedDelayTime as String] as? NSNumber)
+                ?? (pngInfo?[kCGImagePropertyAPNGUnclampedDelayTime as String] as? NSNumber)
+            let delayTime = (gifInfo?[kCGImagePropertyGIFDelayTime as String] as? NSNumber)
+                ?? (pngInfo?[kCGImagePropertyAPNGDelayTime as String] as? NSNumber)
             guard let frameDuration = unclampedDelayTime ?? delayTime else {
-                return gifDefaultFrameDuration
+                return defaultFrameDuration
             }
-            return frameDuration.doubleValue > 0.011 ? frameDuration.doubleValue : gifDefaultFrameDuration
+            return frameDuration.doubleValue > 0.011 ? frameDuration.doubleValue : defaultFrameDuration
         }
-        
-        // First frame caches immediately so Core Animation can reuse the bitmap
-        var optionDict = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, nil, nil) as Dictionary
-        optionDict[kCGImageSourceShouldCacheImmediately] = kCFBooleanTrue
-        let option = optionDict as CFDictionary
+
         var list = [KKImage]()
         var duration = 0.0
-        let firstProperties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
-        
         for i in 0..<count {
-            guard let cgImage = CGImageSourceCreateImageAtIndex(source, i, i == 0 ? option : nil) else {
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, i, nil) as NSDictionary?
+            let cgImage: CGImage?
+            let transformed: Bool
+            #if os(macOS)
+            let maxPixelSize = thumbnailMaxPixelSize(request: request, properties: properties) ?? orientationMaxPixelSize(properties: properties)
+            #else
+            let maxPixelSize = thumbnailMaxPixelSize(request: request, properties: properties)
+            #endif
+            if let maxPixelSize {
+                let options = [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceShouldCacheImmediately: true,
+                    kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+                ] as CFDictionary
+                cgImage = CGImageSourceCreateThumbnailAtIndex(source, i, options)
+                transformed = true
+            } else {
+                let options = [kCGImageSourceShouldCacheImmediately: i == 0] as CFDictionary
+                cgImage = CGImageSourceCreateImageAtIndex(source, i, options)
+                transformed = false
+            }
+            guard let cgImage else {
                 continue
             }
-            let properties: NSDictionary? = i == 0 ? firstProperties : CGImageSourceCopyPropertiesAtIndex(source, i, nil)
-            list.append(imageFrom(cgImage: cgImage, properties: firstProperties))
-            
-            if let properties,
-               let gifInfo = properties[kCGImagePropertyGIFDictionary as String] as? NSDictionary {
-                duration += frameDuration(from: gifInfo)
-            }
+            list.append(imageFrom(cgImage: cgImage, properties: properties, transformed: transformed))
+            duration += frameDuration(from: properties)
         }
         
         if list.count <= 1 {
@@ -114,4 +120,49 @@ extension SystemDecoder: ImageDecoder {
         return list.first
         #endif
     }
+
+    private func thumbnailMaxPixelSize(request: ImageRequest, properties: NSDictionary?) -> Int? {
+        guard request.processors.contains(.predrawn),
+              let properties,
+              let pixelWidth = properties[kCGImagePropertyPixelWidth as String] as? NSNumber,
+              let pixelHeight = properties[kCGImagePropertyPixelHeight as String] as? NSNumber else {
+            return nil
+        }
+        let orientation = (properties[kCGImagePropertyOrientation as String] as? NSNumber)?.uint32Value ?? 1
+        let isRotated = (5...8).contains(orientation)
+        let width = CGFloat(truncating: isRotated ? pixelHeight : pixelWidth)
+        let height = CGFloat(truncating: isRotated ? pixelWidth : pixelHeight)
+        guard width.isFinite, height.isFinite, width > 0, height > 0 else { return nil }
+
+        let scale: CGFloat
+        switch request.size {
+        case .original:
+            return nil
+        case .width(let targetWidth, _):
+            guard targetWidth.isFinite, targetWidth > 0 else { return nil }
+            scale = targetWidth * screenScale / width
+        case .absolute(let target):
+            guard target.width.isFinite, target.height.isFinite, target.width > 0, target.height > 0 else { return nil }
+            let widthScale = target.width * screenScale / width
+            let heightScale = target.height * screenScale / height
+            switch request.mode {
+            case .fit: scale = min(widthScale, heightScale)
+            case .fill: scale = max(widthScale, heightScale)
+            }
+        }
+        // ImageIO's bound is the longest side; fill must retain enough pixels on the shorter side for cropping.
+        return max(1, Int(ceil(max(width, height) * min(scale, 1))))
+    }
+
+    #if os(macOS)
+    private func orientationMaxPixelSize(properties: NSDictionary?) -> Int? {
+        guard let properties,
+              let orientation = properties[kCGImagePropertyOrientation as String] as? NSNumber,
+              orientation.intValue != 1,
+              let width = properties[kCGImagePropertyPixelWidth as String] as? NSNumber,
+              let height = properties[kCGImagePropertyPixelHeight as String] as? NSNumber else { return nil }
+        // NSImage(CGImage) has no orientation field, so normalize even when keeping the original resolution.
+        return max(width.intValue, height.intValue, 1)
+    }
+    #endif
 }

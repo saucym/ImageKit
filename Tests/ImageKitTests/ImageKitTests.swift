@@ -66,11 +66,11 @@ struct DiskCacheTests {
         #expect(disk.isEnabled(for: request))
         disk.store(data, for: request)
         let loaded = try #require(disk.load(request))
-        guard case .image(let image) = loaded else {
-            Issue.record("expected image")
+        guard case .data(let stored) = loaded else {
+            Issue.record("expected original data")
             return
         }
-        #expect(abs(image.size.width - 4) < 0.5)
+        #expect(stored == data)
     }
     
     @Test
@@ -154,20 +154,17 @@ struct PredrawnProcessorTests {
 
 enum TestImage {
     static func image(size: CGSize) -> KKImage? {
+        guard let context = CGContext(data: nil, width: Int(size.width), height: Int(size.height),
+                                      bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        context.fill(CGRect(origin: .zero, size: size))
+        guard let image = context.makeImage() else { return nil }
         #if os(macOS)
-        let image = NSImage(size: size)
-        image.lockFocus()
-        NSColor.red.setFill()
-        NSBezierPath(rect: NSRect(origin: .zero, size: size)).fill()
-        image.unlockFocus()
-        return image
+        return NSImage(cgImage: image, size: size)
         #else
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        return UIGraphicsImageRenderer(size: size, format: format).image { ctx in
-            UIColor.red.setFill()
-            ctx.fill(CGRect(origin: .zero, size: size))
-        }
+        return UIImage(cgImage: image, scale: 1, orientation: .up)
         #endif
     }
     

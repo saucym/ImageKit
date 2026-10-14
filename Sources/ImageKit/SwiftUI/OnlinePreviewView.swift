@@ -424,6 +424,10 @@ private struct ZoomableImageCell: View {
                 await loader.loadImage()
             }
         }
+        .onDisappear {
+            loader.cancel()
+            item.thumbnail?.cancel()
+        }
     }
     
     private var isThumbnailSuccess: Bool {

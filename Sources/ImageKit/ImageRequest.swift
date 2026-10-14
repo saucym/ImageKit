@@ -10,14 +10,14 @@ import SwiftUI
 import ImageIO
 import CryptoKit
 
-public struct RequestProcessor: OptionSet {
+public struct RequestProcessor: OptionSet, Sendable {
     public let rawValue: Int
     public init(rawValue: Int) {
         self.rawValue = rawValue
     }
 }
 
-public struct RequestCache: OptionSet {
+public struct RequestCache: OptionSet, Sendable {
     public static let memory = RequestCache(rawValue: 1 << 0)
     public static let disk = RequestCache(rawValue: 1 << 1)
     
@@ -28,6 +28,12 @@ public struct RequestCache: OptionSet {
 }
 
 public struct ImageRequest {
+    public enum AnimationPolicy: Hashable, Sendable {
+        case automatic
+        case firstFrame
+        case animated
+    }
+
     public enum Size {
         case original // 资源大小
         case absolute(CGSize) // 写死大小
@@ -59,6 +65,7 @@ public struct ImageRequest {
     
     public actor Context {
         public static let `default` = Context()
+        nonisolated let cacheIdentity = UUID()
         public nonisolated let disk: DiskCache
         public nonisolated let decoders: [ImageDecoder]
         public nonisolated let caches: [ImageCache]
@@ -67,7 +74,7 @@ public struct ImageRequest {
         #if DEBUG
         let tag: Int // 1: hidden image
         #endif
-        var taskMap = [Int: Task<KKImage, Error>]()
+        private let tasks = SharedTaskStore<TaskKey, KKImage>()
         public init(disk: DiskCache = .init(),
                     decoders: [ImageDecoder] = [SystemDecoder()],
                     caches: [ImageCache] = [MemoryCache.shared],
@@ -89,7 +96,14 @@ public struct ImageRequest {
     public let url: URL
     public let size: Size
     public let mode: ContentMode
-    public let isGif: Bool? // true: decode to gif, false: decode to image, nil: auto
+    public let animation: AnimationPolicy
+    public var isGif: Bool? {
+        switch animation {
+        case .automatic: nil
+        case .firstFrame: false
+        case .animated: true
+        }
+    }
     public let info: Any?
     public let asset: PHAsset?
     public let processors: RequestProcessor
@@ -105,7 +119,8 @@ public struct ImageRequest {
                 asset: PHAsset? = nil,
                 processors: RequestProcessor = .predrawn,
                 caches: RequestCache = [.memory, .disk],
-                context: Context = .default) {
+                context: Context = .default,
+                animation: AnimationPolicy? = nil) {
         self.key = key ?? ImageRequest.cacheKey(for: url)
         self.url = url
         self.size = size
@@ -115,11 +130,7 @@ public struct ImageRequest {
         self.processors = processors
         self.caches = caches
         self.context = context
-        if let isGif {
-            self.isGif = isGif
-        } else {
-            self.isGif = url.pathExtension.lowercased() == "gif"
-        }
+        self.animation = animation ?? isGif.map { $0 ? .animated : .firstFrame } ?? .automatic
     }
     
     public static func cacheKey(for url: URL) -> String {
@@ -134,13 +145,41 @@ public struct ImageRequest {
         context.disk.localPath(self)
     }
     
-    /// Memory-cache identity: url key + display width + processors.
+    struct OutputKey: Hashable, Sendable {
+        let resource: String
+        let assetIdentifier: String?
+        let width: CGFloat?
+        let height: CGFloat?
+        let isOriginal: Bool
+        let isFill: Bool
+        let animation: AnimationPolicy
+        let processors: Int
+        let scale: CGFloat
+        let context: UUID
+    }
+
+    private struct TaskKey: Hashable, Sendable {
+        let output: OutputKey
+        let caches: Int
+    }
+
+    var outputKey: OutputKey { outputKey(width: size.width) }
+
+    private func outputKey(width: CGFloat?) -> OutputKey {
+        OutputKey(resource: key,
+                  assetIdentifier: asset?.localIdentifier,
+                  width: width,
+                  height: size.height,
+                  isOriginal: size.width == nil,
+                  isFill: mode == .fill,
+                  animation: animation,
+                  processors: processors.rawValue,
+                  scale: screenScale,
+                  context: context.cacheIdentity)
+    }
+
     func cacheKey(width: CGFloat? = nil) -> Int {
-        var hasher = Hasher()
-        hasher.combine(key)
-        hasher.combine(width ?? size.width)
-        hasher.combine(processors.rawValue)
-        return hasher.finalize()
+        outputKey(width: width ?? size.width).hashValue
     }
 }
 
@@ -169,6 +208,11 @@ extension ImageRequest {
     
     func process(_ input: KKImage) -> KKImage {
         var image = input
+        #if os(iOS)
+        if animation == .firstFrame, let first = input.images?.first {
+            image = first
+        }
+        #endif
         for processor in context.processors where processor.isValid(request: self) {
             image = processor.process(request: self, input: image)
         }
@@ -177,49 +221,47 @@ extension ImageRequest {
     
     func load() async throws -> LoadResult {
         for loader in context.loaders where loader.isValid(request: self) {
-            if let result = await loader.load(request: self) {
+            try Task.checkCancellation()
+            if let result = try await loader.loadResult(request: self) {
                 return result
             }
         }
         throw IKError.loaderIsEmpty
     }
+
+    private func loadImage() async throws -> KKImage {
+        if let cached = try await cachedImage() {
+            try Task.checkCancellation()
+            return cached
+        }
+        let result = try await load()
+        try Task.checkCancellation()
+        let image: KKImage
+        switch result {
+        case .image(let loaded): image = loaded
+        case .data(let data): image = try decode(data: data)
+        }
+        try Task.checkCancellation()
+        let processed = process(image)
+        try Task.checkCancellation()
+        await cache(image: processed)
+        return processed
+    }
 }
 
 private extension ImageRequest.Context {
     func load(request: ImageRequest) async throws -> KKImage {
+        try Task.checkCancellation()
         if let cached = try await request.cachedImage() {
+            try Task.checkCancellation()
             return cached
         }
-        
-        let key = request.cacheKey()
-        let task: Task<KKImage, Error>
-        if let existing = taskMap[key] {
-            task = existing
-        } else {
-            task = Task {
-                let result = try await request.load()
-                switch result {
-                case .image(let image):
-                    let processed = request.process(image)
-                    await request.cache(image: processed)
-                    return processed
-                case .data(let data):
-                    let image = try request.decode(data: data)
-                    let processed = request.process(image)
-                    await request.cache(image: processed)
-                    return processed
-                }
-            }
-            taskMap[key] = task
+        let key = ImageRequest.TaskKey(output: request.outputKey, caches: request.caches.rawValue)
+        let image = try await tasks.value(for: key) {
+            try await request.loadImage()
         }
-        do {
-            let result = try await task.value
-            taskMap[key] = nil
-            return result
-        } catch {
-            taskMap[key] = nil
-            throw error
-        }
+        try Task.checkCancellation()
+        return image
     }
 }
 
@@ -234,6 +276,7 @@ public enum IKError: Error {
     case loaderIsEmpty
     case imageSourceCreateError
     case decoderImageIsNil
+    case invalidHTTPStatus(Int)
 }
 
 extension String {

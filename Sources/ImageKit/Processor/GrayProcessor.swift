@@ -22,6 +22,9 @@ public struct GrayProcessor: ImageProcessor {
     public func process(request: ImageRequest, input: KKImage) -> KKImage {
         #if os(iOS)
         if let images = input.images, !images.isEmpty {
+            if request.animation == .firstFrame {
+                return images[0].toGray()
+            }
             let newImages = images.map { $0.toGray() }
             if let newImage = KKImage.animatedImage(with: newImages, duration: input.duration) {
                 return newImage
@@ -34,11 +37,17 @@ public struct GrayProcessor: ImageProcessor {
 
 private extension KKImage {
     func toGray() -> KKImage {
+        guard let cgImage else { return self }
         let colorSpace = CGColorSpaceCreateDeviceGray()
-        let width = Int(size.width * scale)
-        let height = Int(size.height * scale)
-        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace, bitmapInfo: CGImageByteOrderInfo.orderDefault.rawValue),
-              let cgImage else {
+        let width = cgImage.width
+        let height = cgImage.height
+        let hasAlpha: Bool
+        switch cgImage.alphaInfo {
+        case .first, .last, .premultipliedFirst, .premultipliedLast, .alphaOnly: hasAlpha = true
+        default: hasAlpha = false
+        }
+        let alphaInfo: CGImageAlphaInfo = hasAlpha ? .premultipliedLast : .none
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace, bitmapInfo: alphaInfo.rawValue) else {
             return self
         }
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
@@ -46,7 +55,7 @@ private extension KKImage {
             return self
         }
         #if os(iOS)
-        return KKImage(cgImage: grayImage, scale: scale, orientation: .up)
+        return KKImage(cgImage: grayImage, scale: scale, orientation: imageOrientation)
         #else
         return KKImage(cgImage: grayImage, scale: scale)
         #endif

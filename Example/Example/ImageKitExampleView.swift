@@ -36,8 +36,10 @@ struct ImageKitExampleView: View {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: space) {
                     ForEach(store) { url in
-                        let loader = URLImageLoader(.init(url, size: .absolute(imageSize), processors: grayed ? [.gray, .predrawn] : .predrawn))
-                        ImageView(loader: loader)
+                        let request = ImageRequest(url,
+                                                   size: .absolute(imageSize),
+                                                   processors: grayed ? [.gray, .predrawn] : .predrawn)
+                        ImageView(request: request)
                         .overlay(alignment: .topTrailing) {
                             Text(url.pathExtension)
                                 .foregroundColor(.yellow)
