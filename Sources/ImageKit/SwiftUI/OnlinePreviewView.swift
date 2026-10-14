@@ -88,12 +88,20 @@ public struct OnlinePreviewView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var offset: CGFloat = 0
     @State private var opacity: Double = 1.0
+    @State private var zoomedItemIDs = Set<Item.ID>()
+    @State private var dismissDragBlocked = false
+    @GestureState private var dismissDragActive = false
     
     private var currentItem: Item? {
         guard let currentID = state.currentID else { return state.items.first }
         return state.items.first { $0.id == currentID } ?? state.items.first
     }
     
+    private var isZooming: Bool {
+        guard let item = currentItem else { return false }
+        return zoomedItemIDs.contains(item.id)
+    }
+
     public var body: some View {
         ZStack {
             Color.black.opacity(opacity).ignoresSafeArea()
@@ -101,12 +109,26 @@ public struct OnlinePreviewView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 0) {
                     ForEach(state.items) { item in
-                        ZoomableImageCell(item: item) {
+                        ZoomableImageCell(item: item, onZoomChange: { isZoomed in
+                            if isZoomed {
+                                zoomedItemIDs.insert(item.id)
+                                if item.id == currentItem?.id {
+                                    if dismissDragActive {
+                                        dismissDragBlocked = true
+                                    }
+                                    offset = 0
+                                    opacity = 1.0
+                                }
+                            } else {
+                                zoomedItemIDs.remove(item.id)
+                            }
+                        }) {
+                            guard !isZooming else { return }
                             withAnimation(.easeInOut(duration: 0.2)) {
                                 showControls.toggle()
                             }
                         }
-                        .containerRelativeFrame(.horizontal)
+                        .containerRelativeFrame([.horizontal, .vertical])
                     }
                 }
                 .scrollTargetLayout()
@@ -117,15 +139,15 @@ public struct OnlinePreviewView: View {
             .scaleEffect(1 - (offset / 1000))
             .ignoresSafeArea()
             
-            if showControls {
+            if showControls && !isZooming {
                 controllerView
             }
         }
         .presentationBackground(.clear)
         .preferredColorScheme(.dark)
         #if os(iOS)
-        .statusBarHidden(!showControls)
-        .persistentSystemOverlays(showControls ? .automatic : .hidden)
+        .statusBarHidden(!showControls || isZooming)
+        .persistentSystemOverlays(showControls && !isZooming ? .automatic : .hidden)
         #endif
         .alert("文件名", isPresented: $showFullName) {
             Button("好", role: .cancel) {}
@@ -134,14 +156,22 @@ public struct OnlinePreviewView: View {
         }
         .simultaneousGesture(
             DragGesture()
+                .updating($dismissDragActive) { _, state, _ in
+                    state = true
+                }
                 .onChanged { value in
+                    if isZooming {
+                        dismissDragBlocked = true
+                    }
+                    guard !dismissDragBlocked else { return }
                     if abs(value.translation.height) > abs(value.translation.width), value.translation.height > 0 {
                         offset = value.translation.height
                         opacity = Double(1 - (offset / 500))
                     }
                 }
-                .onEnded { value in
-                    if value.translation.height > 150 {
+                .onEnded { _ in
+                    guard !dismissDragBlocked, !isZooming, offset > 0 else { return }
+                    if offset > 150 {
                         dismiss()
                     } else {
                         withAnimation(.spring()) {
@@ -149,8 +179,14 @@ public struct OnlinePreviewView: View {
                             opacity = 1.0
                         }
                     }
-                }
+                },
+            including: isZooming ? .subviews : .all
         )
+        .onChange(of: dismissDragActive) { _, isActive in
+            if !isActive {
+                dismissDragBlocked = false
+            }
+        }
     }
     
     @ViewBuilder private var controllerView: some View {
@@ -216,6 +252,7 @@ public struct OnlinePreviewView: View {
             dismiss()
             return
         }
+        zoomedItemIDs.remove(item.id)
         state.items.remove(at: index)
         if state.items.isEmpty {
             dismiss()
@@ -251,20 +288,25 @@ private struct ZoomableImageCell: View {
     private static let emptyThumbnailResult = ImageResult()
     
     let item: OnlinePreviewView.Item
+    let onZoomChange: (Bool) -> Void
     let onSingleTap: () -> Void
     var loader: URLImageLoader { item.loader }
     @ObservedObject private var result: ImageResult
     @ObservedObject private var thumbnailResult: ImageResult
     
-    init(item: OnlinePreviewView.Item, onSingleTap: @escaping () -> Void) {
+    init(item: OnlinePreviewView.Item, onZoomChange: @escaping (Bool) -> Void, onSingleTap: @escaping () -> Void) {
         self.item = item
+        self.onZoomChange = onZoomChange
         self.onSingleTap = onSingleTap
         result = item.loader.result
         thumbnailResult = item.thumbnail?.result ?? Self.emptyThumbnailResult
     }
     
+    #if !os(iOS)
     @State private var scale: CGFloat = 1.0
-    @GestureState private var gestureScale: CGFloat = 1.0
+    @State private var baseScale: CGFloat = 1.0
+    @GestureState private var isPinching = false
+    #endif
     
     private var displayImage: KKImage? {
         if case .success(let image) = result.value {
@@ -283,52 +325,43 @@ private struct ZoomableImageCell: View {
         return false
     }
     
-    var body: some View {
+    @ViewBuilder private var previewContent: some View {
+        #if os(iOS)
+        if let image = displayImage {
+            ImagePreviewZoomView(image: image, livePhoto: hasOriginal ? result.livePhoto : nil,
+                                 showsLivePhotoButton: hasOriginal && item.liveVideo.first != nil,
+                                 isLoadingLivePhoto: result.livePhotoLoading,
+                                 onSingleTap: onSingleTap, onLivePhoto: { loader.loadLivePhoto() },
+                                 onZoomChange: onZoomChange)
+        } else if case .failure = result.value, item.thumbnail == nil || !isThumbnailSuccess {
+            Text("error")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .foregroundStyle(.white)
+                .onTapGesture(perform: onSingleTap)
+        } else {
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onTapGesture(perform: onSingleTap)
+        }
+        #else
         GeometryReader { proxy in
             ScrollView([.horizontal, .vertical], showsIndicators: false) {
                 if let image = displayImage {
-                    let totalScale = scale * gestureScale
-                    let height = max(proxy.size.width / max(image.size.width, 1) * image.size.height, 1)
-                    Group {
-                        #if os(iOS)
-                        if hasOriginal, let livePhoto = result.livePhoto {
-                            LivePhotoView(livePhoto: livePhoto)
-                                .overlay(alignment: .bottomTrailing) {
-                                    Image(systemName: "livephoto")
-                                        .padding(10)
-                                }
-                        } else {
-                            image.swiftUIView
-                                .resizable()
-                                .scaledToFit()
-                                .overlay(alignment: .bottomTrailing) {
-                                    if hasOriginal, item.liveVideo.first != nil {
-                                        Button {
-                                            loader.loadLivePhoto()
-                                        } label: {
-                                            if loader.result.livePhotoLoading {
-                                                ProgressView()
-                                                    .padding(10)
-                                            } else {
-                                                Image(systemName: "livephoto")
-                                                    .padding(10)
-                                            }
-                                        }
-                                        .disabled(loader.result.livePhotoLoading)
-                                    }
-                                }
-                        }
-                        #else
-                        image.swiftUIView
-                            .resizable()
-                            .scaledToFit()
-                        #endif
-                    }
-                    .frame(width: proxy.size.width, height: height)
-                    .scaleEffect(totalScale)
+                    let fitScale = min(proxy.size.width / max(image.size.width, 1),
+                                       proxy.size.height / max(image.size.height, 1))
+                    let size = CGSize(width: image.size.width * fitScale,
+                                      height: image.size.height * fitScale)
+                    image.swiftUIView
+                        .resizable()
+                        .scaledToFit()
+                    .frame(width: size.width, height: size.height)
+                    .scaleEffect(scale)
+                    .frame(width: max(proxy.size.width, size.width * scale),
+                           height: max(proxy.size.height, size.height * scale))
                     .onTapGesture(count: 2) {
                         withAnimation(.spring()) {
                             scale = (scale > 1.0) ? 1.0 : 2.5
+                            baseScale = scale
                         }
                     }
                     .onTapGesture(count: 1) {
@@ -336,29 +369,51 @@ private struct ZoomableImageCell: View {
                     }
                     .gesture(
                         MagnifyGesture()
-                            .updating($gestureScale) { value, state, _ in
-                                state = value.magnification
+                            .updating($isPinching) { _, state, _ in
+                                state = true
                             }
-                            .onEnded { value in
-                                withAnimation(.spring()) {
-                                    scale *= value.magnification
-                                    scale = min(max(scale, 1.0), scale * 4.0)
+                            .onChanged { value in
+                                var transaction = Transaction(animation: nil)
+                                transaction.disablesAnimations = true
+                                withTransaction(transaction) {
+                                    scale = min(max(baseScale * value.magnification, 1.0), 4.0)
                                 }
                             }
                     )
                 } else if case .failure = result.value, item.thumbnail == nil || !isThumbnailSuccess {
                     Text("error")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .frame(width: proxy.size.width, height: proxy.size.height)
                         .foregroundStyle(.white)
                         .onTapGesture(perform: onSingleTap)
                 } else {
                     ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .frame(width: proxy.size.width, height: proxy.size.height)
                         .onTapGesture(perform: onSingleTap)
                 }
             }
+            .defaultScrollAnchor(.center)
         }
-        .scrollDisabled(scale <= 1.0)
+        .scrollDisabled(isPinching || scale <= 1.0)
+        .onChange(of: isPinching) { _, isPinching in
+            if !isPinching {
+                // 结束或取消时只保存显示值，避免再次叠乘手势倍率。
+                baseScale = scale
+            }
+        }
+        .onChange(of: isPinching || scale > 1.0, initial: true) { _, isZoomed in
+            onZoomChange(isZoomed)
+        }
+        .onAppear {
+            onZoomChange(isPinching || scale > 1.0)
+        }
+        .onDisappear {
+            onZoomChange(false)
+        }
+        #endif
+    }
+
+    var body: some View {
+        previewContent
         .task(id: item.id) {
             if let thumbnail = item.thumbnail {
                 if case .success = thumbnail.result.value { } else {
@@ -376,22 +431,5 @@ private struct ZoomableImageCell: View {
             return true
         }
         return false
-    }
+    } 
 }
-
-#if os(iOS)
-struct LivePhotoView: UIViewRepresentable {
-    let livePhoto: PHLivePhoto
-
-    func makeUIView(context: Context) -> PHLivePhotoView {
-        let view = PHLivePhotoView()
-        view.livePhoto = livePhoto
-        view.isMuted = false
-        return view
-    }
-
-    func updateUIView(_ uiView: PHLivePhotoView, context: Context) {
-        uiView.livePhoto = livePhoto
-    }
-}
-#endif
