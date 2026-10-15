@@ -85,7 +85,16 @@ extension NSObject {
     fileprivate static func swizzling(_ originalSelector: Selector, _ swizzledSelector: Selector) {
         if let originalMethod = class_getInstanceMethod(self, originalSelector),
            let swizzledMethod = class_getInstanceMethod(self, swizzledSelector) {
-            method_exchangeImplementations(originalMethod, swizzledMethod)
+            // An inherited Method belongs to the superclass; install an override before replacing it.
+            if class_addMethod(self, originalSelector,
+                               method_getImplementation(swizzledMethod),
+                               method_getTypeEncoding(swizzledMethod)) {
+                class_replaceMethod(self, swizzledSelector,
+                                    method_getImplementation(originalMethod),
+                                    method_getTypeEncoding(originalMethod))
+            } else {
+                method_exchangeImplementations(originalMethod, swizzledMethod)
+            }
         } else {
             logInfo("swizzling error")
         }

@@ -220,13 +220,38 @@ extension ImageRequest {
     }
     
     func load() async throws -> LoadResult {
+        try await loadResource().result
+    }
+
+    private func loadResource() async throws -> LoadedResource {
         for loader in context.loaders where loader.isValid(request: self) {
             try Task.checkCancellation()
-            if let result = try await loader.loadResult(request: self) {
-                return result
+            if let resourceLoader = loader as? any ResourceLoader {
+                if let resource = try await resourceLoader.loadResource(request: self) {
+                    return resource
+                }
+            } else if let result = try await loader.loadResult(request: self) {
+                return LoadedResource(result: result)
             }
         }
         throw IKError.loaderIsEmpty
+    }
+
+    private func decode(_ resource: LoadedResource) throws -> KKImage {
+        try Task.checkCancellation()
+        switch resource.result {
+        case .image(let image): return image
+        case .data(let data):
+            do {
+                return try decode(data: data)
+            } catch {
+                try Task.checkCancellation()
+                if case IKError.decoderIsEmpty = error { throw error }
+                if error is CancellationError { throw error }
+                resource.invalidateCachedData?()
+                throw error
+            }
+        }
     }
 
     private func loadImage() async throws -> KKImage {
@@ -234,12 +259,17 @@ extension ImageRequest {
             try Task.checkCancellation()
             return cached
         }
-        let result = try await load()
-        try Task.checkCancellation()
+        let resource = try await loadResource()
         let image: KKImage
-        switch result {
-        case .image(let loaded): image = loaded
-        case .data(let data): image = try decode(data: data)
+        do {
+            image = try decode(resource)
+        } catch {
+            try Task.checkCancellation()
+            if case IKError.decoderIsEmpty = error { throw error }
+            if error is CancellationError { throw error }
+            guard let reload = resource.reload else { throw error }
+            let reloaded = try await reload()
+            image = try decode(reloaded)
         }
         try Task.checkCancellation()
         let processed = process(image)

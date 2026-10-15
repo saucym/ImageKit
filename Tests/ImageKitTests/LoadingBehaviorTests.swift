@@ -68,6 +68,79 @@ struct LoadingBehaviorTests {
     }
 
     @Test
+    func corruptDiskDataIsReplacedByOneFreshDownload() async throws {
+        let fixture = LoadingFixture()
+        let decoder = RecordingDecoder(acceptedData: fixture.plan.data)
+        let context = ImageRequest.Context(disk: fixture.disk, decoders: [decoder], caches: [], processors: [], loaders: [fixture.loader])
+        let request = ImageRequest(fixture.url, size: .original, processors: [], context: context)
+        let corruptData = Data([0xff])
+        fixture.disk.store(corruptData, for: request)
+
+        _ = try await request.send()
+        #expect(decoder.decodedData == [corruptData, fixture.plan.data])
+        #expect(fixture.plan.cachePolicies == [.reloadIgnoringLocalCacheData])
+        _ = try await request.send()
+        #expect(fixture.plan.requestCount == 1)
+        #expect(decoder.decodedData.last == fixture.plan.data)
+    }
+
+    @Test(arguments: [false, true])
+    func invalidDownloadedDataIsRemovedWithoutRepeatedRetries(seedCorruptCache: Bool) async throws {
+        let fixture = LoadingFixture()
+        let request = fixture.request()
+        if seedCorruptCache { fixture.disk.store(Data([0xff]), for: request) }
+        do {
+            _ = try await request.send()
+            Issue.record("expected invalid image failure")
+        } catch IKError.imageSourceCreateError, IKError.decoderImageIsNil { }
+        #expect(fixture.plan.requestCount == 1)
+        #expect(fixture.disk.load(request) == nil)
+    }
+
+    @Test
+    func missingDecoderDoesNotInvalidateCachedDataOrDownloadAgain() async throws {
+        let fixture = LoadingFixture()
+        let context = ImageRequest.Context(disk: fixture.disk, decoders: [], caches: [], loaders: [fixture.loader])
+        let request = ImageRequest(fixture.url, size: .original, context: context)
+        fixture.disk.store(fixture.plan.data, for: request)
+        do {
+            _ = try await request.send()
+            Issue.record("expected missing decoder failure")
+        } catch IKError.decoderIsEmpty { }
+        #expect(fixture.plan.requestCount == 0)
+        #expect(fixture.disk.load(request) != nil)
+    }
+
+    @Test
+    func decoderCancellationDoesNotInvalidateCachedDataOrRetry() async throws {
+        let fixture = LoadingFixture()
+        let context = ImageRequest.Context(disk: fixture.disk, decoders: [CancelledDecoder()], caches: [], loaders: [fixture.loader])
+        let request = ImageRequest(fixture.url, size: .original, context: context)
+        fixture.disk.store(fixture.plan.data, for: request)
+        do {
+            _ = try await request.send()
+            Issue.record("expected cancellation")
+        } catch is CancellationError { }
+        #expect(fixture.plan.requestCount == 0)
+        #expect(fixture.disk.load(request) != nil)
+    }
+
+    @Test
+    func cacheRecoveryPreservesNetworkFailure() async throws {
+        let fixture = LoadingFixture(error: URLError(.timedOut))
+        let request = fixture.request()
+        fixture.disk.store(Data([0xff]), for: request)
+        do {
+            _ = try await request.send()
+            Issue.record("expected recovery download failure")
+        } catch let error as URLError {
+            #expect(error.code == .timedOut)
+        }
+        #expect(fixture.plan.requestCount == 1)
+        #expect(fixture.disk.load(request) == nil)
+    }
+
+    @Test
     func coalescesDownloadsForDifferentOutputSizes() async throws {
         let fixture = LoadingFixture(automaticallyResponds: false)
         let first = Task { try await fixture.loader.loadResult(request: fixture.request(size: .width(40), caches: [])) }
@@ -117,9 +190,19 @@ private struct LegacyLoader: DataLoader {
     func load(request: ImageRequest) async -> LoadResult? { .data(Data([0x42])) }
 }
 
+private struct CancelledDecoder: ImageDecoder {
+    func isValid(request: ImageRequest) -> Bool { true }
+    func decode(request: ImageRequest, data: Data) throws -> KKImage { throw CancellationError() }
+}
+
 private final class RecordingDecoder: ImageDecoder {
     private let lock = NSLock()
     private var values = [Data]()
+    private let acceptedData: Data?
+
+    init(acceptedData: Data? = nil) {
+        self.acceptedData = acceptedData
+    }
 
     var decodedData: [Data] {
         lock.lock()
@@ -133,6 +216,7 @@ private final class RecordingDecoder: ImageDecoder {
         lock.lock()
         values.append(data)
         lock.unlock()
+        if let acceptedData, data != acceptedData { throw IKError.imageSourceCreateError }
         return KKImage()
     }
 }
@@ -175,6 +259,7 @@ private final class StubResponse: @unchecked Sendable {
     private let lock = NSLock()
     private var protocols = [LoadingURLProtocol]()
     private var starts = 0
+    private var policies = [URLRequest.CachePolicy]()
 
     init(statusCode: Int, error: Error?, automaticallyResponds: Bool) {
         self.statusCode = statusCode
@@ -188,9 +273,16 @@ private final class StubResponse: @unchecked Sendable {
         return starts
     }
 
+    var cachePolicies: [URLRequest.CachePolicy] {
+        lock.lock()
+        defer { lock.unlock() }
+        return policies
+    }
+
     func start(_ instance: LoadingURLProtocol) {
         lock.lock()
         starts += 1
+        policies.append(instance.request.cachePolicy)
         protocols.append(instance)
         lock.unlock()
         if automaticallyResponds {

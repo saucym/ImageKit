@@ -23,10 +23,11 @@ public struct URLImageLoader: ImageLoading, Equatable {
         self.request = request
         self.liveVideo = liveVideo
         do {
+            if let image = try request.cachedImage() {
+                result.value = .success(image)
+            }
             if liveVideo != nil {
                 syncLoadLivePhoto()
-            } else if let image = try request.cachedImage() {
-                result.value = .success(image)
             }
         } catch {
             result.value = .failure(error)
@@ -78,57 +79,101 @@ extension URLImageLoader {
     @MainActor func loadLivePhoto() {
         guard let liveVideo else { return }
         let token = state.beginLive()
-        result.livePhotoLoading = true
+        state.publishLive(token) {
+            result.livePhotoLoading = true
+            result.livePhotoError = nil
+        }
         let task = Task { @MainActor in
             defer { state.finishLiveTask(token) }
             if request.url.scheme == "ph" {
                 let localIdentifier = request.url.absoluteString.replacingOccurrences(of: "ph://", with: "")
                 fetchLivePhoto(localIdentifier: localIdentifier, token: token)
             } else {
-                _ = await NetworkLoader().load(request: request)
-                guard !Task.isCancelled, state.isLiveCurrent(token) else { return }
-                _ = await NetworkLoader().load(request: liveVideo)
-                guard !Task.isCancelled, state.isLiveCurrent(token) else { return }
-                requestLivePhoto(token: token)
+                do {
+                    let resources = try await LivePhotoResources.prepare(image: request, video: liveVideo)
+                    guard !Task.isCancelled, state.isLiveCurrent(token) else { return }
+                    requestLivePhoto(resources: resources, token: token, allowsImageFallback: true)
+                } catch is CancellationError {
+                    state.publishLive(token) { result.livePhotoLoading = false }
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    await failLivePhoto(error, token: token)
+                }
             }
         }
         state.attachLive(task, token: token)
     }
 
     @MainActor func syncLoadLivePhoto() {
-        guard liveVideo != nil else { return }
-        requestLivePhoto(token: state.beginLive())
+        guard let liveVideo, request.url.scheme != "ph" else { return }
+        do {
+            guard let resources = try LivePhotoResources.cached(image: request, video: liveVideo) else { return }
+            let token = state.beginLive()
+            state.publishLive(token) { result.livePhotoLoading = true }
+            requestLivePhoto(resources: resources, token: token, allowsImageFallback: false)
+        } catch {
+            result.livePhotoError = error
+        }
     }
 
-    @MainActor private func requestLivePhoto(token: UUID) {
-        guard let liveVideo, state.isLiveCurrent(token) else { return }
-        let resourceURLs = [request.localPath(), liveVideo.localPath()]
-        let requestID = PHLivePhoto.request(withResourceFileURLs: resourceURLs,
+    @MainActor private func requestLivePhoto(resources: LivePhotoResources, token: UUID, allowsImageFallback: Bool) {
+        guard state.isLiveCurrent(token) else { return }
+        let requestID = PHLivePhoto.request(withResourceFileURLs: resources.urls,
                                             placeholderImage: nil,
                                             targetSize: .zero,
-                                            contentMode: .aspectFit) { livePhoto, info in
+                                            contentMode: .aspectFit) { [resources] livePhoto, info in
             let isDegraded = info[PHLivePhotoInfoIsDegradedKey] as? Bool ?? false
+            let isCancelled = info[PHLivePhotoInfoCancelledKey] as? Bool ?? false
+            let error = info[PHLivePhotoInfoErrorKey] as? Error
             Task { @MainActor in
                 guard state.isLiveCurrent(token) else { return }
-                if let livePhoto, !isDegraded {
-                    state.publishLive(token) {
-                        result.livePhoto = livePhoto
+                if isCancelled {
+                    state.finishLivePhoto(token) {
                         result.livePhotoLoading = false
+                        result.requestID = nil
+                    }
+                    return
+                }
+                if let error {
+                    await failLivePhoto(error, token: token, allowsImageFallback: allowsImageFallback)
+                    return
+                }
+                if let livePhoto, !isDegraded {
+                    resources.retain(for: livePhoto)
+                    state.finishLivePhoto(token) {
+                        result.livePhoto = livePhoto
+                        result.livePhotoError = nil
+                        result.livePhotoLoading = false
+                        result.requestID = nil
                     }
                 } else if !isDegraded {
-                    state.publishLive(token) { result.livePhotoLoading = false }
-                    await loadImage(expectedLiveToken: token)
+                    await failLivePhoto(LivePhotoResourceError.photoUnavailable, token: token, allowsImageFallback: allowsImageFallback)
                 }
             }
         }
-        result.requestID = requestID
+        state.publishLive(token) { result.requestID = requestID }
         state.attachLivePhoto(requestID, token: token)
     }
 
+    @MainActor private func failLivePhoto(_ error: Error, token: UUID, allowsImageFallback: Bool = true) async {
+        state.finishLivePhoto(token) {
+            result.livePhotoError = error
+            result.livePhotoLoading = false
+            result.requestID = nil
+        }
+        guard allowsImageFallback else { return }
+        if case .success = result.value { return }
+        await loadImage(expectedLiveToken: token)
+    }
+
     @MainActor private func fetchLivePhoto(localIdentifier: String, token: UUID) {
+        guard !Task.isCancelled, state.isLiveCurrent(token) else { return }
         let assets = PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil)
         guard let asset = assets.firstObject, asset.mediaSubtypes.contains(.photoLive) else {
-            state.publishLive(token) { result.livePhotoLoading = false }
+            state.finishLivePhoto(token) {
+                result.livePhotoLoading = false
+                result.livePhotoError = LivePhotoResourceError.assetUnavailable
+            }
             return
         }
         let options = PHLivePhotoRequestOptions()
@@ -138,12 +183,28 @@ extension URLImageLoader {
                                                                  targetSize: .zero,
                                                                  contentMode: .aspectFit,
                                                                  options: options) { livePhoto, info in
-            let isDegraded = info?[PHLivePhotoInfoIsDegradedKey] as? Bool ?? false
+            let isDegraded = info?[PHImageResultIsDegradedKey] as? Bool ?? false
+            let isCancelled = info?[PHImageCancelledKey] as? Bool ?? false
+            let error = info?[PHImageErrorKey] as? Error
             Task { @MainActor in
+                guard state.isLiveCurrent(token) else { return }
+                if isCancelled {
+                    state.finishLivePhoto(token) { result.livePhotoLoading = false }
+                    return
+                }
+                if let error {
+                    await failLivePhoto(error, token: token)
+                    return
+                }
                 guard !isDegraded else { return }
-                state.publishLive(token) {
-                    result.livePhoto = livePhoto
-                    result.livePhotoLoading = false
+                if let livePhoto {
+                    state.finishLivePhoto(token) {
+                        result.livePhoto = livePhoto
+                        result.livePhotoError = nil
+                        result.livePhotoLoading = false
+                    }
+                } else {
+                    await failLivePhoto(LivePhotoResourceError.photoUnavailable, token: token)
                 }
             }
         }
@@ -256,6 +317,15 @@ private final class LoadingState: @unchecked Sendable {
     func publishLive(_ token: UUID, _ publish: () -> Void) {
         locked {
             guard liveToken == token else { return }
+            publish()
+        }
+    }
+
+    func finishLivePhoto(_ token: UUID, _ publish: () -> Void) {
+        locked {
+            guard liveToken == token else { return }
+            livePhotoID = nil
+            assetPhotoID = nil
             publish()
         }
     }

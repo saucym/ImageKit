@@ -87,6 +87,7 @@ public final class ImageResult: ObservableObject {
     @Published public var value: ImagePhase = .empty
     @Published public var livePhoto: PHLivePhoto? = nil
     @Published public internal(set) var livePhotoLoading = false
+    @Published public internal(set) var livePhotoError: (any Error)? = nil
     var requestID: PHLivePhotoRequestID? = nil
     public init() { }
 }

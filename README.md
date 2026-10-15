@@ -73,6 +73,30 @@ Requests default to automatic animation detection from image data. Use
 animation explicitly. The existing `isGif` parameter remains supported.
 Animated playback is supported on iOS; macOS returns the first frame.
 
+### Cache configuration
+
+```swift
+let memory = MemoryCache(totalCostLimit: 64 * 1024 * 1024)
+let disk = DiskCache(maxSize: 256 * 1024 * 1024,
+                     maxAge: 7 * 24 * 60 * 60)
+let context = ImageRequest.Context(disk: disk, caches: [memory])
+let request = ImageRequest(url, size: .width(240), context: context)
+
+disk.remove(request)
+disk.clear()
+await memory.clear()
+```
+
+Memory caching defaults to a 64 MiB cost budget. Disk caching defaults to
+256 MiB and a seven-day lifetime. A disk size or age of zero disables storage;
+memory limits of zero leave the corresponding `NSCache` limit unrestricted. Disk entries
+that fail image decoding are invalidated and fetched again at most once. Missing
+decoders and cancellation do not invalidate cached data.
+
+Live Photo resources use each request's configured loaders and can load with
+disk caching disabled. `ImageResult.livePhotoError` exposes loading and assembly
+errors while allowing the still image to remain visible.
+
 Custom loaders can implement `loadResult(request:)` to propagate errors. Existing
 `DataLoader` implementations remain supported through the default adapter.
 

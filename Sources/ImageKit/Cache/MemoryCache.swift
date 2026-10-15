@@ -3,6 +3,17 @@ import Foundation
 public class MemoryCache {
     public static let shared = MemoryCache()
 
+    public let totalCostLimit: Int
+    public let countLimit: Int
+
+    /// Limits use NSCache semantics: zero leaves that limit unrestricted.
+    public init(totalCostLimit: Int = 64 * 1024 * 1024, countLimit: Int = 0) {
+        self.totalCostLimit = max(totalCostLimit, 0)
+        self.countLimit = max(countLimit, 0)
+        cache.totalCostLimit = self.totalCostLimit
+        cache.countLimit = self.countLimit
+    }
+
     private final class Key: NSObject {
         let output: ImageRequest.OutputKey
 
@@ -23,6 +34,25 @@ public class MemoryCache {
     public func isValid(request: ImageRequest) -> Bool {
         request.caches.contains(.memory)
     }
+
+    @MainActor static func cost(of image: KKImage) -> Int {
+        #if os(iOS)
+        let frames = image.images ?? [image]
+        #else
+        let frames = [image]
+        #endif
+        var seen = Set<ObjectIdentifier>()
+        var cost = 0
+        for frame in frames {
+            guard let bitmap = frame.cgImage,
+                  seen.insert(ObjectIdentifier(bitmap)).inserted else { continue }
+            let (frameCost, multiplicationOverflow) = bitmap.bytesPerRow.multipliedReportingOverflow(by: bitmap.height)
+            let (total, additionOverflow) = cost.addingReportingOverflow(frameCost)
+            guard !multiplicationOverflow, !additionOverflow else { return Int.max }
+            cost = total
+        }
+        return cost
+    }
 }
 
 extension MemoryCache: ImageCache {
@@ -31,7 +61,7 @@ extension MemoryCache: ImageCache {
     }
 
     @MainActor public func cache(_ image: KKImage, for request: ImageRequest) {
-        cache.setObject(image, forKey: Key(request.outputKey))
+        cache.setObject(image, forKey: Key(request.outputKey), cost: Self.cost(of: image))
     }
 
     @MainActor public func clear() async {
