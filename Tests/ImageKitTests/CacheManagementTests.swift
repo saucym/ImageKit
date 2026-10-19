@@ -179,6 +179,46 @@ struct CacheManagementTests {
     }
 
     @Test
+    func dotPrefixedKeysStayInsideTheCacheDirectory() throws {
+        let fixture = CacheFixture()
+        let request = fixture.request("..image")
+        let neighbor = fixture.root.appendingPathComponent(request.key)
+        try Data([9]).write(to: neighbor)
+
+        #expect(fixture.disk.load(request) == nil)
+        fixture.disk.store(Data([1]), for: request)
+        #expect(try cachedData(fixture.disk, request: request) == Data([1]))
+        #expect(fixture.disk.localPath(request).standardizedFileURL.path.hasPrefix(fixture.disk.dir.standardizedFileURL.path + "/"))
+        #expect(try Data(contentsOf: neighbor) == Data([9]))
+
+        fixture.disk.remove(request)
+        #expect(fixture.disk.load(request) == nil)
+        #expect(try Data(contentsOf: neighbor) == Data([9]))
+        fixture.disk.store(Data([2]), for: request)
+        fixture.disk.clear()
+        #expect(try Data(contentsOf: neighbor) == Data([9]))
+    }
+
+    @Test
+    func cacheOperationsDoNotFollowEntrySymlinks() throws {
+        let fixture = CacheFixture()
+        let request = fixture.request("linked")
+        let target = fixture.root.appendingPathComponent("outside")
+        try Data([9]).write(to: target)
+        let link = fixture.disk.localPath(request)
+        try FileManager.default.createDirectory(at: link.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+
+        #expect(fixture.disk.load(request) == nil)
+        fixture.disk.store(Data([1]), for: request)
+        fixture.disk.remove(request)
+        fixture.disk.remove(request, matching: Data([9]))
+        #expect(try FileManager.default.attributesOfItem(atPath: link.path)[.type] as? FileAttributeType == .typeSymbolicLink)
+        fixture.disk.clear()
+        #expect(try Data(contentsOf: target) == Data([9]))
+    }
+
+    @Test
     func diskHashingUsesConfigurationInsteadOfLockIdentity() {
         let fixture = CacheFixture()
         let equivalent = DiskCache(fixture.disk.dir, maxSize: fixture.disk.maxSize, maxAge: fixture.disk.maxAge)
@@ -193,7 +233,11 @@ struct CacheManagementTests {
         #expect(memory.totalCostLimit == 1024 * 1024)
         #expect(memory.countLimit == 8)
         let bitmap = try makeBitmap(width: 7, height: 11, bytesPerRow: 64)
+        #if os(iOS)
+        let image = KKImage(cgImage: bitmap, scale: 1, orientation: .up)
+        #else
         let image = KKImage(cgImage: bitmap, scale: 1)
+        #endif
         #expect(MemoryCache.cost(of: image) == bitmap.bytesPerRow * bitmap.height)
         let request = ImageRequest(URL(string: "https://example.invalid/image")!, size: .original)
         memory.cache(image, for: request)

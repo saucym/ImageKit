@@ -16,7 +16,7 @@ A[View] -->B(MemoryCache)
     F --> A
 ```
 
-## Feature
+## Features
 1. Cache: Memory (decoded) · Disk (raw bytes for network)
 1. Loader: Local · Network
 1. Decoder: Image · Gif
@@ -65,7 +65,8 @@ imageView.cancelImageLoad()
 ### Async loading
 
 ```swift
-let image = try await request.send()
+let image = try await ImageRequest(url).send()
+let thumbnail = request.resized(to: .width(120))
 ```
 
 Requests default to automatic animation detection from image data. Use
@@ -97,9 +98,31 @@ Live Photo resources use each request's configured loaders and can load with
 disk caching disabled. `ImageResult.livePhotoError` exposes loading and assembly
 errors while allowing the still image to remain visible.
 
-Custom loaders can implement `loadResult(request:)` to propagate errors. Existing
-`DataLoader` implementations remain supported through the default adapter.
+Custom loaders implement `DataLoader.isValid(request:)` and
+`load(request:) async throws -> LoadResult?`. Return `nil` to try the next
+matching loader or throw to preserve the failure. Existing nonthrowing loaders
+and `loadResult(request:)` implementations remain supported.
 
 SwiftUI request views retain their loading state and reload when the resource or
 request options change. Leaving the view cancels its subscription. Cancelling one
 subscriber does not cancel other subscribers sharing the same load.
+
+## Design
+
+`ImageRequest` is an immutable description shared by async loading and UI views.
+`ImageRequest.Context` owns the configured loaders, decoders, processors, caches,
+and shared work. Memory caching identifies the processed output; disk caching
+preserves original network bytes. Request cancellation releases one subscription
+and cancels the underlying work when no subscribers remain.
+
+## API migration
+
+- `ImageRequest(url)` defaults to the original size. Use `resized(to:)` to copy
+  a request with a different size; `makeRequest(size:)` forwards to it and is deprecated.
+- `URLImageLoader` is a final class with a stable `result` reference. Update
+  `result.value` rather than replacing `result`.
+- Calling `load(request:)` through `DataLoader`, `LocalLoader`, or `NetworkLoader`
+  now requires `try await` and preserves errors.
+  Existing nonthrowing loader implementations continue to conform.
+- Rendering helpers are private. Use `ImageView` or `ImageCustomView` instead
+  of `AutoResizeImageView`, and native color initializers instead of `KKColor(hex:alpha:)`.

@@ -22,7 +22,8 @@ final class LivePhotoResources {
         return try LivePhotoResources(image: image, imageData: data[0], video: video, videoData: data[1])
     }
 
-    static func cached(image: ImageRequest, video: ImageRequest) throws -> LivePhotoResources? {
+    static func cached(image: ImageRequest, video: ImageRequest) async throws -> LivePhotoResources? {
+        try Task.checkCancellation()
         guard let imageData = try cachedData(for: image),
               let videoData = try cachedData(for: video) else { return nil }
         return try LivePhotoResources(image: image, imageData: imageData, video: video, videoData: videoData)
@@ -66,6 +67,7 @@ final class LivePhotoResources {
     }
 
     private static func cachedData(for request: ImageRequest) throws -> Data? {
+        try Task.checkCancellation()
         if request.url.isFileURL {
             return try Data(contentsOf: request.url)
         }

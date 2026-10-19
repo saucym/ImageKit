@@ -55,8 +55,10 @@ public struct DiskCache: Hashable, Sendable {
     public func localPath(_ key: String) -> URL {
         if splitSubDir {
             let subName = key.prefix(2)
+            // A custom key can begin with "..", which must not become a parent-directory partition.
+            let partition = subName == ".." ? "_" : String(subName)
             return dir
-                .appendingPathComponent(String(subName))
+                .appendingPathComponent(partition)
                 .appendingPathComponent(key)
         }
         return dir.appendingPathComponent(key)
@@ -68,15 +70,14 @@ public struct DiskCache: Hashable, Sendable {
     
     public func load(_ request: ImageRequest) -> LoadResult? {
         state.locked {
-            guard isValidPath(for: request) else { return nil }
-            let url = localPath(request)
-            guard let attributes = fileAttributes(at: url),
+            guard let url = validatedPath(for: request),
+                  let attributes = fileAttributes(at: url),
                   attributes[.type] as? FileAttributeType == .typeRegular else { return nil }
-            let size = (attributes[.size] as? NSNumber)?.intValue ?? 0
+            let size = fileSize(in: attributes)
             guard maxSize > 0, maxAge > 0, size <= maxSize,
                   let modified = attributes[.modificationDate] as? Date,
                   Date().timeIntervalSince(modified) < maxAge else {
-                removeFile(at: url)
+                removeFile(at: url, size: size)
                 return nil
             }
             do {
@@ -91,19 +92,20 @@ public struct DiskCache: Hashable, Sendable {
     public func store(_ data: Data, for request: ImageRequest) {
         guard !data.isEmpty else { return }
         state.locked {
-            guard isValidPath(for: request) else { return }
-            let url = localPath(request)
+            guard let url = validatedPath(for: request) else { return }
+            let attributes = fileAttributes(at: url)
+            if let attributes, attributes[.type] as? FileAttributeType != .typeRegular { return }
+            let previousSize = attributes.map(fileSize(in:)) ?? 0
             guard maxSize > 0, maxAge > 0, data.count <= maxSize else {
-                removeFile(at: url)
+                if attributes != nil { removeFile(at: url, size: previousSize) }
                 return
             }
             do {
                 let parent = url.deletingLastPathComponent()
                 try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true, attributes: nil)
-                let previousSize = fileSize(at: url)
                 try data.write(to: url, options: .atomic)
                 if let estimatedSize = state.estimatedSize {
-                    state.estimatedSize = estimatedSize - previousSize + data.count
+                    state.estimatedSize = max(0, estimatedSize - previousSize) + data.count
                 }
                 trimIfNeeded(now: Date())
             } catch {
@@ -114,18 +116,18 @@ public struct DiskCache: Hashable, Sendable {
 
     public func remove(_ request: ImageRequest) {
         state.locked {
-            guard isValidPath(for: request) else { return }
-            removeFile(at: localPath(request))
+            guard let url = validatedPath(for: request) else { return }
+            removeFile(at: url)
         }
     }
 
     func remove(_ request: ImageRequest, matching data: Data) {
         state.locked {
-            guard isValidPath(for: request) else { return }
-            let url = localPath(request)
-            guard fileAttributes(at: url)?[.type] as? FileAttributeType == .typeRegular,
+            guard let url = validatedPath(for: request),
+                  let attributes = fileAttributes(at: url),
+                  attributes[.type] as? FileAttributeType == .typeRegular,
                   let current = try? Data(contentsOf: url), current == data else { return }
-            removeFile(at: url)
+            removeFile(at: url, size: fileSize(in: attributes))
         }
     }
 
@@ -145,30 +147,32 @@ public struct DiskCache: Hashable, Sendable {
         }
     }
 
-    private func isValidPath(for request: ImageRequest) -> Bool {
+    private func validatedPath(for request: ImageRequest) -> URL? {
         let key = request.key
         guard !key.isEmpty, key != ".", key != "..", !key.contains("/"), !key.contains("\\"),
-              fileAttributes(at: dir)?[.type] as? FileAttributeType == .typeDirectory else { return false }
+              fileAttributes(at: dir)?[.type] as? FileAttributeType == .typeDirectory else { return nil }
         let url = localPath(request)
         let parent = url.deletingLastPathComponent()
         if parent != dir, let attributes = fileAttributes(at: parent),
-           attributes[.type] as? FileAttributeType != .typeDirectory { return false }
-        if let attributes = fileAttributes(at: url),
-           attributes[.type] as? FileAttributeType != .typeRegular { return false }
-        return true
+           attributes[.type] as? FileAttributeType != .typeDirectory { return nil }
+        return url
     }
 
     private func fileAttributes(at url: URL) -> [FileAttributeKey: Any]? {
         try? FileManager.default.attributesOfItem(atPath: url.path)
     }
 
-    private func fileSize(at url: URL) -> Int {
-        (fileAttributes(at: url)?[.size] as? NSNumber)?.intValue ?? 0
+    private func fileSize(in attributes: [FileAttributeKey: Any]) -> Int {
+        (attributes[.size] as? NSNumber)?.intValue ?? 0
     }
 
     private func removeFile(at url: URL) {
-        guard fileAttributes(at: url)?[.type] as? FileAttributeType == .typeRegular else { return }
-        let size = fileSize(at: url)
+        guard let attributes = fileAttributes(at: url),
+              attributes[.type] as? FileAttributeType == .typeRegular else { return }
+        removeFile(at: url, size: fileSize(in: attributes))
+    }
+
+    private func removeFile(at url: URL, size: Int) {
         do {
             try FileManager.default.removeItem(at: url)
             if let estimatedSize = state.estimatedSize {
@@ -209,12 +213,15 @@ public struct DiskCache: Hashable, Sendable {
                 total += size
             }
         }
-        for entry in entries.sorted(by: { $0.modified < $1.modified }) where total > maxSize {
-            do {
-                try FileManager.default.removeItem(at: entry.url)
-                total -= entry.size
-            } catch {
-                logInfo("DiskCache.trim.error:\(error)")
+        if total > maxSize {
+            for entry in entries.sorted(by: { $0.modified < $1.modified }) {
+                guard total > maxSize else { break }
+                do {
+                    try FileManager.default.removeItem(at: entry.url)
+                    total -= entry.size
+                } catch {
+                    logInfo("DiskCache.trim.error:\(error)")
+                }
             }
         }
         state.estimatedSize = total

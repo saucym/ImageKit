@@ -89,7 +89,7 @@ struct DecodingBehaviorTests {
     func predrawingPreservesTransparentAndTranslucentPixels() throws {
         let original = try DecodingFixture.image(width: 200, height: 100, alpha: 0.5)
         let request = request(size: .absolute(CGSize(width: 20, height: 10)))
-        let processed = try #require(PredrawnProcessor().process(request: request, input: KKImage(cgImage: original, scale: 1)).cgImage)
+        let processed = try #require(PredrawnProcessor().process(request: request, input: DecodingFixture.platformImage(original)).cgImage)
         #expect(try DecodingFixture.pixel(in: processed, xFraction: 0.1).alpha == 0)
         #expect(abs(Int(try DecodingFixture.pixel(in: processed, xFraction: 0.9).alpha) - 128) <= 1)
     }
@@ -98,7 +98,7 @@ struct DecodingBehaviorTests {
     func grayscalePreservesAlpha() throws {
         let original = try DecodingFixture.image(width: 40, height: 20, alpha: 0.5)
         let request = request(size: .original, processors: .gray)
-        let processed = try #require(GrayProcessor().process(request: request, input: KKImage(cgImage: original, scale: 1)).cgImage)
+        let processed = try #require(GrayProcessor().process(request: request, input: DecodingFixture.platformImage(original)).cgImage)
         let transparent = try DecodingFixture.pixel(in: processed, xFraction: 0.1)
         let translucent = try DecodingFixture.pixel(in: processed, xFraction: 0.9)
         #expect(transparent.alpha == 0)
@@ -111,12 +111,71 @@ struct DecodingBehaviorTests {
     func fillCropsSmallImagesWithoutUpscaling() throws {
         let original = try DecodingFixture.image(width: 20, height: 10)
         let request = request(size: .absolute(CGSize(width: 100, height: 100)))
-        let image = try #require(PredrawnProcessor().process(request: request, input: KKImage(cgImage: original, scale: 1)).cgImage)
+        let image = try #require(PredrawnProcessor().process(request: request, input: DecodingFixture.platformImage(original)).cgImage)
         #expect(image.width == 10)
         #expect(image.height == 10)
     }
 
+    @Test
+    func veryLargeFillTargetsStillCropWithoutUpscaling() throws {
+        let original = try DecodingFixture.image(width: 200, height: 100)
+        let request = request(size: .absolute(CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)))
+        let image = try #require(PredrawnProcessor().process(request: request, input: DecodingFixture.platformImage(original)).cgImage)
+        #expect(image.width == 100)
+        #expect(image.height == 100)
+    }
+
+    @Test
+    func invalidTargetDimensionsKeepTheSourceImage() throws {
+        let original = try DecodingFixture.image(width: 200, height: 100)
+        let source = DecodingFixture.platformImage(original)
+        let data = try DecodingFixture.data(width: 200, height: 100)
+        let sizes: [ImageRequest.Size] = [
+            .width(.nan),
+            .width(.infinity),
+            .absolute(CGSize(width: -1, height: 10)),
+            .absolute(CGSize(width: 10, height: 0))
+        ]
+        for size in sizes {
+            let request = request(size: size)
+            #expect(PredrawnProcessor().process(request: request, input: source) === source)
+            let decoded = try #require(SystemDecoder().decode(request: request, data: data).cgImage)
+            #expect(decoded.width == 200)
+            #expect(decoded.height == 100)
+        }
+    }
+
+    @Test
+    func grayscaleReusesAnAlreadyMonochromeImage() throws {
+        let original = DecodingFixture.platformImage(try DecodingFixture.image(width: 40, height: 20))
+        let request = request(size: .original, processors: .gray)
+        let gray = GrayProcessor().process(request: request, input: original)
+        #expect(GrayProcessor().process(request: request, input: gray) === gray)
+    }
+
     #if os(iOS)
+    @Test
+    func processingRepeatedAnimationFramesReusesTheProcessedBitmap() throws {
+        let frame = DecodingFixture.platformImage(try DecodingFixture.image(width: 80, height: 40))
+        let animation = try #require(KKImage.animatedImage(with: [frame, frame], duration: 0.2))
+        let request = request(size: .absolute(CGSize(width: 8, height: 8)), processors: [.gray, .predrawn])
+        for processor in [GrayProcessor() as any ImageProcessor, PredrawnProcessor()] {
+            let processed = processor.process(request: request, input: animation)
+            let frames = try #require(processed.images)
+            #expect(frames.count == 2)
+            #expect(frames[0] === frames[1])
+            #expect(abs(processed.duration - 0.2) < 0.01)
+        }
+    }
+
+    @Test
+    func unchangedAnimationKeepsTheOriginalImage() throws {
+        let frame = DecodingFixture.platformImage(try DecodingFixture.image(width: 20, height: 10))
+        let animation = try #require(KKImage.animatedImage(with: [frame, frame], duration: 0.2))
+        let request = request(size: .original)
+        #expect(PredrawnProcessor().process(request: request, input: animation) === animation)
+    }
+
     @Test
     func automaticAnimationUsesImageContentInsteadOfTheURLSuffix() throws {
         let data = try DecodingFixture.gifData()
@@ -185,6 +244,14 @@ private enum DecodingFixture {
         let green: UInt8
         let blue: UInt8
         let alpha: UInt8
+    }
+
+    static func platformImage(_ image: CGImage) -> KKImage {
+        #if os(iOS)
+        KKImage(cgImage: image, scale: 1, orientation: .up)
+        #else
+        KKImage(cgImage: image, scale: 1)
+        #endif
     }
 
     static func image(width: Int, height: Int, alpha: CGFloat = 1, isBlue: Bool = false) throws -> CGImage {

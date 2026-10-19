@@ -20,33 +20,19 @@ public struct GrayProcessor: ImageProcessor {
     }
 
     public func process(request: ImageRequest, input: KKImage) -> KKImage {
-        #if os(iOS)
-        if let images = input.images, !images.isEmpty {
-            if request.animation == .firstFrame {
-                return images[0].toGray()
-            }
-            let newImages = images.map { $0.toGray() }
-            if let newImage = KKImage.animatedImage(with: newImages, duration: input.duration) {
-                return newImage
-            }
+        input.processingFrames(animation: request.animation) { frame in
+            frame.toGray()
         }
-        #endif
-        return input.toGray()
     }
 }
 
 private extension KKImage {
     func toGray() -> KKImage {
-        guard let cgImage else { return self }
+        guard let cgImage, cgImage.colorSpace?.model != .monochrome else { return self }
         let colorSpace = CGColorSpaceCreateDeviceGray()
         let width = cgImage.width
         let height = cgImage.height
-        let hasAlpha: Bool
-        switch cgImage.alphaInfo {
-        case .first, .last, .premultipliedFirst, .premultipliedLast, .alphaOnly: hasAlpha = true
-        default: hasAlpha = false
-        }
-        let alphaInfo: CGImageAlphaInfo = hasAlpha ? .premultipliedLast : .none
+        let alphaInfo: CGImageAlphaInfo = cgImage.hasAlpha ? .premultipliedLast : .none
         guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace, bitmapInfo: alphaInfo.rawValue) else {
             return self
         }

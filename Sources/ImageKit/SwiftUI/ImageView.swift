@@ -6,102 +6,6 @@
 //
 
 import SwiftUI
-import PhotosUI
-
-public enum ImagePhase: Sendable {
-    case empty
-    case success(KKImage)
-    case failure(any Error)
-    
-    var imageSize: CGSize? {
-        if case .success(let image) = self {
-            return image.size
-        }
-        return nil
-    }
-    
-    @ViewBuilder func buildView(loader: any ImageLoading) -> some View {
-        buildView(request: loader.request)
-    }
-
-    @ViewBuilder func buildView(request: ImageRequest) -> some View {
-        switch self {
-        case .success(let image):
-            #if os(iOS)
-            if request.context.isDisplay() {
-                iOSImageView(image, request: request)
-            } else {
-                Text(image.images == nil ? request.url.lastPathComponent : "gif")
-                    .frame(width: request.size.width, height: request.size.height ?? image.size.height / KKScreen.main.scale)
-                    .border(color: .green)
-            }
-            #else
-            buildImageView(image, request: request)
-            #endif
-        case .empty:
-            ProgressView()
-                .frame(width: request.size.width, height: request.size.defaultHeight)
-                .border(color: .gray)
-        case .failure:
-            Text("error")
-                .frame(width: request.size.width, height: request.size.defaultHeight)
-                .border(color: .red)
-        }
-    }
-}
-
-#if os(iOS)
-@ViewBuilder func iOSImageView(_ image: KKImage, request: ImageRequest) -> some View {
-    if image.images != nil {
-        GenericView<AutoResizeImageView> {
-            AutoResizeImageView(size: CGSize(width: request.size.width ?? image.size.width,
-                                            height: request.size.height ?? image.size.height))
-        } updater: { view in
-            view.image = image
-            view.contentMode = request.mode == .fit ? .scaleAspectFit : .scaleAspectFill
-            view.updateSize(CGSize(width: request.size.width ?? image.size.width,
-                                   height: request.size.height ?? image.size.height))
-        }
-        .frame(width: request.size.width, height: request.size.height)
-        .clipped()
-        .contentShape(Rectangle())
-    } else {
-        buildImageView(image, request: request)
-    }
-}
-#endif
-
-func buildImageView(_ image: KKImage, loader: any ImageLoading) -> some View {
-    buildImageView(image, request: loader.request)
-}
-
-private func buildImageView(_ image: KKImage, request: ImageRequest) -> some View {
-    image.swiftUIView
-        .resizable()
-        .aspectRatio(contentMode: request.mode)
-        .frame(width: request.size.width, height: request.size.height)
-        .clipped()
-}
-
-public final class ImageResult: ObservableObject {
-    @Published public var value: ImagePhase = .empty
-    @Published public var livePhoto: PHLivePhoto? = nil
-    @Published public internal(set) var livePhotoLoading = false
-    @Published public internal(set) var livePhotoError: (any Error)? = nil
-    var requestID: PHLivePhotoRequestID? = nil
-    public init() { }
-}
-
-public protocol ImageLoading {
-    var request: ImageRequest { get }
-    var result: ImageResult { get }
-    func loadImage() async
-    func cancel()
-}
-
-public extension ImageLoading {
-    func cancel() { }
-}
 
 public struct ImageView: View {
     public init(loader: any ImageLoading) {
@@ -118,8 +22,8 @@ public struct ImageView: View {
     
     private let source: ImageViewSource
     public var body: some View {
-        ImageCustomView(source: source) {
-            $0.buildView(loader: $1)
+        ImageCustomView(source: source) { phase, loader in
+            ImagePhaseContent(phase: phase, request: loader.request)
         }
     }
 }
@@ -187,22 +91,6 @@ fileprivate enum ImageViewSource {
     case loader(any ImageLoading)
 }
 
-struct ImageLoadingID: Hashable {
-    private let output: ImageRequest.OutputKey
-    private let url: URL
-    private let caches: Int
-    private let placeholderHeight: CGFloat?
-    private let result: ObjectIdentifier?
-
-    init(request: ImageRequest, result: ImageResult? = nil) {
-        output = request.outputKey
-        url = request.url
-        caches = request.caches.rawValue
-        placeholderHeight = request.size.defaultHeight
-        self.result = result.map(ObjectIdentifier.init)
-    }
-}
-
 @MainActor
 private final class RequestImageState: ObservableObject {
     @Published private(set) var loader: URLImageLoader
@@ -261,10 +149,82 @@ private struct LoaderImageContent<Content: View>: View {
     }
 }
 
-extension View {
-    func border(color: KKColor = KKColor(hex: .random(in: 0...0xffffff))) -> some View {
+private struct ImagePhaseContent: View {
+    let phase: ImagePhase
+    let request: ImageRequest
+
+    var body: some View {
+        switch phase {
+        case .success(let image):
+            #if os(iOS)
+            if request.context.displaysImages {
+                RequestedImageContent(image: image, request: request)
+            } else {
+                Text(image.images == nil ? request.url.lastPathComponent : "gif")
+                    .frame(width: request.size.width,
+                           height: request.size.height ?? image.size.height / KKScreen.main.scale)
+                    .debugBorder(.green)
+            }
+            #else
+            RequestedImageContent(image: image, request: request)
+            #endif
+        case .empty:
+            ProgressView()
+                .frame(width: request.size.width, height: request.size.defaultHeight)
+                .debugBorder(.gray)
+        case .failure:
+            Text("error")
+                .frame(width: request.size.width, height: request.size.defaultHeight)
+                .debugBorder(.red)
+        }
+    }
+}
+
+private struct RequestedImageContent: View {
+    let image: KKImage
+    let request: ImageRequest
+
+    var body: some View {
+        #if os(iOS)
+        if image.images != nil {
+            GenericView<AnimatedImageView> {
+                AnimatedImageView(size: displaySize)
+            } updater: { view in
+                if view.image !== image { view.image = image }
+                view.contentMode = request.mode == .fit ? .scaleAspectFit : .scaleAspectFill
+                view.updateSize(displaySize)
+            }
+            .frame(width: request.size.width, height: request.size.height)
+            .clipped()
+            .contentShape(Rectangle())
+        } else {
+            staticImage
+        }
+        #else
+        staticImage
+        #endif
+    }
+
+    private var staticImage: some View {
+        image.swiftUIView
+            .resizable()
+            .aspectRatio(contentMode: request.mode)
+            .frame(width: request.size.width, height: request.size.height)
+            .clipped()
+    }
+
+    #if os(iOS)
+    private var displaySize: CGSize {
+        CGSize(width: request.size.width ?? image.size.width,
+               height: request.size.height ?? image.size.height)
+    }
+    #endif
+}
+
+private extension View {
+    func debugBorder(_ color: Color) -> some View {
         #if DEBUG
-        self.border(Color(color))
+        border(color)
         #else
         self
         #endif
@@ -272,43 +232,35 @@ extension View {
 }
 
 private extension ImageRequest.Context {
-    nonisolated func isDisplay() -> Bool {
+    nonisolated var displaysImages: Bool {
         #if DEBUG
-        return tag != 1
+        tag != 1
         #else
-        return true
+        true
         #endif
     }
 }
 
-extension KKColor {
-    @objc public convenience init(hex: Int, alpha: CGFloat = 1) {
-        let red = CGFloat((hex >> 16) & 0xFF)
-        let green = CGFloat((hex >> 8) & 0xFF)
-        let blue = CGFloat(hex & 0xFF)
-        self.init(red: red / 255.0, green: green / 255.0, blue: blue / 255.0, alpha: alpha)
-    }
-}
-
-#if canImport(UIKit)
+#if os(iOS)
 import UIKit
 
-public class AutoResizeImageView: UIImageView {
+private final class AnimatedImageView: UIImageView {
     private var size: CGSize
-    public init(size: CGSize) {
+
+    init(size: CGSize) {
         self.size = size
         super.init(frame: .zero)
     }
-    
+
     required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+        return nil
     }
-    
-    public override var intrinsicContentSize: CGSize {
+
+    override var intrinsicContentSize: CGSize {
         size
     }
 
-    fileprivate func updateSize(_ size: CGSize) {
+    func updateSize(_ size: CGSize) {
         guard self.size != size else { return }
         self.size = size
         invalidateIntrinsicContentSize()

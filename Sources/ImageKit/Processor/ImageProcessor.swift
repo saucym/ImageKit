@@ -1,5 +1,5 @@
 //
-//  Processor.swift
+//  ImageProcessor.swift
 //  ImageKit
 //
 

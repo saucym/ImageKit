@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 public class MemoryCache {
@@ -37,21 +38,25 @@ public class MemoryCache {
 
     @MainActor static func cost(of image: KKImage) -> Int {
         #if os(iOS)
-        let frames = image.images ?? [image]
-        #else
-        let frames = [image]
-        #endif
-        var seen = Set<ObjectIdentifier>()
-        var cost = 0
-        for frame in frames {
-            guard let bitmap = frame.cgImage,
-                  seen.insert(ObjectIdentifier(bitmap)).inserted else { continue }
-            let (frameCost, multiplicationOverflow) = bitmap.bytesPerRow.multipliedReportingOverflow(by: bitmap.height)
-            let (total, additionOverflow) = cost.addingReportingOverflow(frameCost)
-            guard !multiplicationOverflow, !additionOverflow else { return Int.max }
-            cost = total
+        if let frames = image.images {
+            var seen = Set<ObjectIdentifier>()
+            var cost = 0
+            for frame in frames {
+                guard let bitmap = frame.cgImage,
+                      seen.insert(ObjectIdentifier(bitmap)).inserted else { continue }
+                let (total, overflow) = cost.addingReportingOverflow(bitmapCost(bitmap))
+                guard !overflow else { return Int.max }
+                cost = total
+            }
+            return cost
         }
-        return cost
+        #endif
+        return image.cgImage.map(bitmapCost) ?? 0
+    }
+
+    private static func bitmapCost(_ bitmap: CGImage) -> Int {
+        let (cost, overflow) = bitmap.bytesPerRow.multipliedReportingOverflow(by: bitmap.height)
+        return overflow ? Int.max : cost
     }
 }
 

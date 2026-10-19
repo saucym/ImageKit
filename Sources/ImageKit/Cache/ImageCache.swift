@@ -1,5 +1,5 @@
 //
-//  Cache.swift
+//  ImageCache.swift
 //  ImageKit
 //
 

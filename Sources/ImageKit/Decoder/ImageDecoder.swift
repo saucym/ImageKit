@@ -1,5 +1,5 @@
 //
-//  Decoder.swift
+//  ImageDecoder.swift
 //  ImageKit
 //
 

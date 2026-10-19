@@ -25,6 +25,18 @@ struct PublicAPITests {
     }
 
     @Test
+    func equivalentLoadersHaveIndependentResults() throws {
+        let request = ImageRequest(URL(string: "https://example.com/image")!, size: .original,
+                                   processors: [], caches: [])
+        let first = URLImageLoader(request)
+        let second = URLImageLoader(request)
+        first.result.value = .success(try #require(TestImage.image(size: CGSize(width: 3, height: 3))))
+
+        #expect(first == second)
+        #expect(isEmpty(second.result.value))
+    }
+
+    @Test
     func cancellingLoaderDoesNotPublishAndCanRestart() async throws {
         let source = ControlledViewLoader()
         let request = makeRequest(source: source)

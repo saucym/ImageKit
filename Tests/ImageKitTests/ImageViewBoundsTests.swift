@@ -25,6 +25,9 @@ struct ImageViewBoundsTests {
         #expect(view.bounds == bounds)
 
         let scrollView = KKScrollView(frame: CGRect(x: 0, y: 0, width: 20, height: 30))
+        #if os(iOS)
+        scrollView.contentSize = CGSize(width: 200, height: 200)
+        #endif
         scrollView.bounds = bounds
         #expect(scrollView.bounds == bounds)
     }
@@ -37,7 +40,7 @@ struct ImageViewBoundsTests {
 
     @Test
     func widthRequestsPreserveAspectSizingAfterImageViewResizes() async throws {
-        try await verifyResize(initialSize: .width(20), expectedHeights: [nil, nil])
+        try await verifyResize(initialSize: .width(20, defaultHeight: 77), expectedHeights: [nil, nil])
     }
 
     private func verifyResize(initialSize: ImageRequest.Size,
@@ -57,6 +60,9 @@ struct ImageViewBoundsTests {
         #expect(await eventually { await source.widths.count == 2 && view.image != nil })
         #expect(await source.widths == [20, 80])
         #expect(await source.heights == expectedHeights)
+        if case .width(_, let placeholderHeight) = initialSize {
+            #expect(await source.placeholderHeights == [placeholderHeight, placeholderHeight])
+        }
     }
 
     private func eventually(_ condition: @MainActor () async -> Bool) async -> Bool {
@@ -74,6 +80,7 @@ private actor BoundsRecordingLoader: DataLoader {
     private let image: KKImage
     private(set) var widths = [CGFloat?]()
     private(set) var heights = [CGFloat?]()
+    private(set) var placeholderHeights = [CGFloat?]()
 
     init(image: KKImage) {
         self.image = image
@@ -84,6 +91,7 @@ private actor BoundsRecordingLoader: DataLoader {
     func load(request: ImageRequest) async -> LoadResult? {
         widths.append(request.size.width)
         heights.append(request.size.height)
+        placeholderHeights.append(request.size.defaultHeight)
         return .image(image)
     }
 }

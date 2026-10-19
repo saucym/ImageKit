@@ -85,7 +85,7 @@ struct LivePhotoResourceTests {
     }
 
     @Test
-    func cachedCopiesSurviveCacheRemovalAndAreReleasedWithResources() throws {
+    func cachedCopiesSurviveCacheRemovalAndAreReleasedWithResources() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ImageKit-LivePhotoTests-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
         let disk = DiskCache(directory)
@@ -94,7 +94,7 @@ struct LivePhotoResourceTests {
         let video = ImageRequest(URL(string: "https://example.invalid/video.mov")!, size: .original, context: context)
         disk.store(Data([1]), for: image)
         disk.store(Data([2]), for: video)
-        var resources = try LivePhotoResources.cached(image: image, video: video)
+        var resources = try await LivePhotoResources.cached(image: image, video: video)
         let urls = try #require(resources?.urls)
         try FileManager.default.removeItem(at: directory)
         #expect(try Data(contentsOf: urls[0]) == Data([1]))
@@ -105,7 +105,7 @@ struct LivePhotoResourceTests {
     }
 
     @Test
-    func synchronousPreparationHonorsDisabledDiskCache() throws {
+    func cachedPreparationHonorsDisabledDiskCache() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ImageKit-LivePhotoTests-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
         let disk = DiskCache(directory)
@@ -114,7 +114,7 @@ struct LivePhotoResourceTests {
         let video = ImageRequest(URL(string: "https://example.invalid/video.mov")!, size: .original, caches: [], context: context)
         disk.store(Data([1]), for: image)
         disk.store(Data([2]), for: video)
-        #expect(try LivePhotoResources.cached(image: image, video: video) == nil)
+        #expect(try await LivePhotoResources.cached(image: image, video: video) == nil)
     }
 
     @MainActor @Test
@@ -167,6 +167,23 @@ struct LivePhotoResourceTests {
         } else {
             Issue.record("Live Photo failure replaced the still image")
         }
+    }
+
+    @MainActor @Test
+    func releasingLoaderCancelsBothLivePhotoResources() async throws {
+        let imageLoader = ControlledLiveResourceLoader()
+        let videoLoader = ControlledLiveResourceLoader()
+        var loader: URLImageLoader? = URLImageLoader(request("image.jpg", loader: imageLoader),
+                                                    liveVideo: request("video.mov", loader: videoLoader))
+        weak var releasedLoader = loader
+        loader?.loadLivePhoto()
+        try await imageLoader.waitForStarts(1)
+        try await videoLoader.waitForStarts(1)
+
+        loader = nil
+        #expect(releasedLoader == nil)
+        try await imageLoader.waitForCancellations(1)
+        try await videoLoader.waitForCancellations(1)
     }
 
     @MainActor @Test
@@ -250,6 +267,14 @@ private actor ControlledLiveResourceLoader: DataLoader {
     func waitForStarts(_ count: Int) async throws {
         for _ in 0..<200 {
             if startCount >= count { return }
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        throw URLError(.timedOut)
+    }
+
+    func waitForCancellations(_ count: Int) async throws {
+        for _ in 0..<200 {
+            if cancellationCount >= count { return }
             try await Task.sleep(nanoseconds: 5_000_000)
         }
         throw URLError(.timedOut)

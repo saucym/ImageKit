@@ -8,7 +8,7 @@ struct LoadingBehaviorTests {
     func rejectsHTTPFailuresBeforeWritingDisk() async throws {
         let fixture = LoadingFixture(statusCode: 503)
         do {
-            _ = try await fixture.loader.loadResult(request: fixture.request())
+            _ = try await fixture.loader.load(request: fixture.request())
             Issue.record("expected HTTP failure")
         } catch IKError.invalidHTTPStatus(let statusCode) {
             #expect(statusCode == 503)
@@ -175,6 +175,29 @@ struct LoadingBehaviorTests {
     }
 
     @Test
+    func throwingLoaderNeedsOnlyOneLoadingMethod() async throws {
+        let fixture = LoadingFixture()
+        let context = ImageRequest.Context(caches: [], processors: [], loaders: [ThrowingLoader()])
+        let request = ImageRequest(fixture.url, context: context)
+        do {
+            _ = try await request.send()
+            Issue.record("expected custom loader failure")
+        } catch let error as URLError {
+            #expect(error.code == .cannotDecodeContentData)
+        }
+    }
+
+    @Test
+    func throwingLoaderCanDeclineAndTryTheNextLoader() async throws {
+        let fixture = LoadingFixture()
+        let decoder = RecordingDecoder()
+        let context = ImageRequest.Context(decoders: [decoder], caches: [], processors: [],
+                                           loaders: [ThrowingLoader(declines: true), LegacyLoader()])
+        _ = try await ImageRequest(fixture.url, context: context).send()
+        #expect(decoder.decodedData == [Data([0x42])])
+    }
+
+    @Test
     func legacyLoaderStillParticipatesInPipeline() async throws {
         let fixture = LoadingFixture()
         let decoder = RecordingDecoder()
@@ -182,6 +205,17 @@ struct LoadingBehaviorTests {
         let request = ImageRequest(fixture.url, size: .original, processors: [], context: context)
         _ = try await request.send()
         #expect(decoder.decodedData == [Data([0x42])])
+    }
+}
+
+private struct ThrowingLoader: DataLoader {
+    let declines: Bool
+
+    init(declines: Bool = false) { self.declines = declines }
+    func isValid(request: ImageRequest) -> Bool { true }
+    func load(request: ImageRequest) async throws -> LoadResult? {
+        if declines { return nil }
+        throw URLError(.cannotDecodeContentData)
     }
 }
 

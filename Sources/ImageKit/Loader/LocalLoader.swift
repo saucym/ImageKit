@@ -30,16 +30,7 @@ extension LocalLoader: DataLoader {
         request.url.scheme != "http" && request.url.scheme != "https"
     }
     
-    public func load(request: ImageRequest) async -> LoadResult? {
-        do {
-            return try await loadResult(request: request)
-        } catch {
-            logInfo(error.localizedDescription)
-            return nil
-        }
-    }
-
-    public func loadResult(request: ImageRequest) async throws -> LoadResult? {
+    public func load(request: ImageRequest) async throws -> LoadResult? {
         try Task.checkCancellation()
         let result: LoadResult?
         if request.url.isFileURL {

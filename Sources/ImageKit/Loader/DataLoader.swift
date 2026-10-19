@@ -1,5 +1,5 @@
 //
-//  Loader.swift
+//  DataLoader.swift
 //  ImageKit
 //
 
@@ -30,15 +30,15 @@ protocol ResourceLoader: DataLoader {
 
 public protocol DataLoader {
     func isValid(request: ImageRequest) -> Bool
-    func load(request: ImageRequest) async -> LoadResult?
-    /// Used by ImageRequest to preserve errors. Returning nil tries the next matching loader.
+    func load(request: ImageRequest) async throws -> LoadResult?
+    /// Compatibility hook for loaders that report errors separately from `load(request:)`.
     func loadResult(request: ImageRequest) async throws -> LoadResult?
 }
 
 public extension DataLoader {
     func loadResult(request: ImageRequest) async throws -> LoadResult? {
         try Task.checkCancellation()
-        let result = await load(request: request)
+        let result = try await load(request: request)
         try Task.checkCancellation()
         return result
     }

@@ -88,27 +88,6 @@ extension KKImage {
     }
 }
 
-extension KKImage {
-    static func scaledFrom(_ originalImage: KKImage, to size: CGSize, rect: CGRect) -> KKImage? {
-        #if os(iOS)
-        UIGraphicsBeginImageContextWithOptions(size, false, 0)
-        originalImage.draw(in: rect)
-        let bitImage = UIGraphicsGetImageFromCurrentImageContext()
-        UIGraphicsEndImageContext()
-        return bitImage
-        #else
-        let image = KKImage(size: size)
-        image.lockFocus()
-        originalImage.draw(at: .zero, from: .init(origin: .zero, size: size), operation: .sourceOver, fraction: 1)
-        image.unlockFocus()
-        if let data = image.tiffRepresentation {
-            return KKImage(data: data)
-        }
-        return nil
-        #endif
-    }
-}
-
 #if os(OSX)
 extension KKImage {
     convenience init?(data: Data, scale: CGFloat) {

@@ -29,33 +29,16 @@ public class PredrawnProcessor: ImageProcessor {
     public init() { }
     
     public func isValid(request: ImageRequest) -> Bool {
-        let modes: [ContentMode] = [.fill, .fit]
-        return request.processors.contains(.predrawn) && modes.contains(request.mode)
+        request.processors.contains(.predrawn)
     }
     
     public func process(request: ImageRequest, input: KKImage) -> KKImage {
-        #if os(iOS)
-        if let images = input.images, !images.isEmpty {
-            if request.animation == .firstFrame {
-                let first = images[0]
-                return processOne(request: request, input: first) ?? first
-            }
-            let outImages = images.map { processOne(request: request, input: $0) ?? $0 }
-            if let image = KKImage.animatedImage(with: outImages, duration: input.duration) {
-                return image
-            }
-        } else if let image = processOne(request: request, input: input) {
-            return image
+        input.processingFrames(animation: request.animation) { frame in
+            processFrame(request: request, input: frame) ?? frame
         }
-        #else
-        if let image = processOne(request: request, input: input) {
-            return image
-        }
-        #endif
-        return input
     }
     
-    private func processOne(request: ImageRequest, input: KKImage) -> KKImage? {
+    private func processFrame(request: ImageRequest, input: KKImage) -> KKImage? {
         guard let cgImage = input.cgImage else { return nil }
         #if os(iOS)
         let isRotated: Bool
@@ -67,31 +50,11 @@ public class PredrawnProcessor: ImageProcessor {
         #else
         let imagePixelSize = CGSize(width: cgImage.width, height: cgImage.height)
         #endif
-        let viewPixelSize: CGSize
-        switch request.size {
-        case .original:
-            return nil
-        case .absolute(let size):
-            viewPixelSize = size * screenScale
-        case .width(let width, _):
-            viewPixelSize = CGSize(width: width, height: imagePixelSize.height / imagePixelSize.width * width) * screenScale
-        }
-        guard viewPixelSize.width.isFinite, viewPixelSize.height.isFinite,
-              viewPixelSize.width > 0, viewPixelSize.height > 0 else { return nil }
-
-        let outputSize: CGSize
-        switch request.mode {
-        case .fit:
-            let scale = min(viewPixelSize.width / imagePixelSize.width, viewPixelSize.height / imagePixelSize.height, 1)
-            outputSize = imagePixelSize * scale
-        case .fill:
-            let scale = min(imagePixelSize.width / viewPixelSize.width, imagePixelSize.height / viewPixelSize.height, 1)
-            outputSize = viewPixelSize * scale
-        }
-        let contextWidth = max(1, Int(floor(outputSize.width)))
-        let contextHeight = max(1, Int(floor(outputSize.height)))
+        guard let plan = ImageResizePlan(request: request, sourceSize: imagePixelSize) else { return nil }
+        let contextWidth = plan.width
+        let contextHeight = plan.height
         guard contextWidth != Int(imagePixelSize.width) || contextHeight != Int(imagePixelSize.height) else { return nil }
-        let canvasSize = CGSize(width: contextWidth, height: contextHeight)
+        let canvasSize = plan.size
         let rect: CGRect
         switch request.mode {
         case .fit:
@@ -101,12 +64,7 @@ public class PredrawnProcessor: ImageProcessor {
             let drawnSize = imagePixelSize * scale
             rect = CGRect(x: (canvasSize.width - drawnSize.width) / 2, y: (canvasSize.height - drawnSize.height) / 2, width: drawnSize.width, height: drawnSize.height)
         }
-        let hasAlpha: Bool
-        switch cgImage.alphaInfo {
-        case .first, .last, .premultipliedFirst, .premultipliedLast, .alphaOnly: hasAlpha = true
-        default: hasAlpha = false
-        }
-        let alphaInfo: CGImageAlphaInfo = hasAlpha ? .premultipliedFirst : .noneSkipFirst
+        let alphaInfo: CGImageAlphaInfo = cgImage.hasAlpha ? .premultipliedFirst : .noneSkipFirst
         let info = CGBitmapInfo.byteOrder32Little.rawValue | alphaInfo.rawValue
         // Align rows so Core Animation can reuse the bitmap without copying.
         let bytesPerRow = ((contextWidth * 4 + 63) / 64) * 64

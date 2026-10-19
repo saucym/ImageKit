@@ -192,7 +192,7 @@ public struct OnlinePreviewView: View {
     @ViewBuilder private var controllerView: some View {
         VStack {
             HStack(spacing: 20) {
-                ControllButton(systemName: "xmark") {
+                PreviewControlButton(systemName: "xmark") {
                     dismiss()
                 }
                 Spacer(minLength: 0)
@@ -206,7 +206,7 @@ public struct OnlinePreviewView: View {
                     }
                 Spacer(minLength: 0)
                 ForEach(currentItem?.menus ?? [], id: \.self) { menu in
-                    ControllButton(systemName: menu.systemName) {
+                    PreviewControlButton(systemName: menu.systemName) {
                         handleMenu(menu)
                     }
                 }
@@ -268,7 +268,7 @@ extension URL: @retroactive Identifiable {
 }
 
 @available(iOS 17.0, macOS 14.0, *)
-private struct ControllButton: View {
+private struct PreviewControlButton: View {
     let systemName: String
     let action: () -> Void
     var body: some View {

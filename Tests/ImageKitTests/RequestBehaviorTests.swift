@@ -12,11 +12,32 @@ struct RequestBehaviorTests {
         let cache = MemoryCache.shared
         cache.cache(image, for: request)
         #expect(try cache.image(for: request) === image)
-        #expect(try cache.image(for: request.makeRequest(size: .absolute(CGSize(width: 100, height: 100)))) == nil)
-        #expect(try cache.image(for: request.makeRequest(size: .original)) == nil)
+        #expect(try cache.image(for: request.resized(to: .absolute(CGSize(width: 100, height: 100)))) == nil)
+        #expect(try cache.image(for: request.resized(to: .original)) == nil)
         #expect(try cache.image(for: ImageRequest(url, size: request.size, mode: .fit)) == nil)
         #expect(try cache.image(for: ImageRequest(url, size: request.size, animation: .firstFrame)) == nil)
         #expect(try cache.image(for: ImageRequest(url, size: request.size, context: .init())) == nil)
+    }
+
+    @Test
+    func resizingPreservesResourceAndConfiguration() {
+        let context = ImageRequest.Context()
+        let request = ImageRequest(URL(string: "https://example.com/image")!,
+                                   mode: .fit, key: "custom", info: "metadata",
+                                   processors: [.gray], caches: [.disk],
+                                   context: context, animation: .firstFrame)
+        #expect(request.size.width == nil)
+        let resized = request.resized(to: .width(80, defaultHeight: 32))
+        #expect(resized.size.width == 80)
+        #expect(resized.size.defaultHeight == 32)
+        #expect(resized.url == request.url)
+        #expect(resized.key == request.key)
+        #expect(resized.mode == request.mode)
+        #expect(resized.info as? String == "metadata")
+        #expect(resized.processors == request.processors)
+        #expect(resized.caches == request.caches)
+        #expect(resized.context === context)
+        #expect(resized.animation == .firstFrame)
     }
 
     @Test
@@ -26,7 +47,7 @@ struct RequestBehaviorTests {
         #expect(ImageRequest(url, size: .original, isGif: false).animation == .firstFrame)
         #expect(ImageRequest(url, size: .original, isGif: true).animation == .animated)
         #expect(ImageRequest(url, size: .original, isGif: true, animation: .firstFrame).animation == .firstFrame)
-        #expect(ImageRequest(url, size: .original, animation: .animated).makeRequest(size: .width(20)).animation == .animated)
+        #expect(ImageRequest(url, size: .original, animation: .animated).resized(to: .width(20)).animation == .animated)
     }
 
     @Test
@@ -45,7 +66,7 @@ struct RequestBehaviorTests {
         #expect(await loader.count == 1)
 
         let shorter = Task { try await request.send() }
-        let taller = Task { try await request.makeRequest(size: .absolute(CGSize(width: 40, height: 80))).send() }
+        let taller = Task { try await request.resized(to: .absolute(CGSize(width: 40, height: 80))).send() }
         try await loader.waitForLoads(3)
         await loader.releaseAll()
         _ = try await shorter.value

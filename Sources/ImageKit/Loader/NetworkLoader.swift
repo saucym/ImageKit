@@ -35,16 +35,7 @@ extension NetworkLoader: DataLoader {
         request.url.scheme == "http" || request.url.scheme == "https"
     }
     
-    public func load(request: ImageRequest) async -> LoadResult? {
-        do {
-            return try await loadResult(request: request)
-        } catch {
-            logInfo(request.url, error.localizedDescription)
-            return nil
-        }
-    }
-
-    public func loadResult(request: ImageRequest) async throws -> LoadResult? {
+    public func load(request: ImageRequest) async throws -> LoadResult? {
         try await loadResource(request: request, useCachedData: true).result
     }
 }
