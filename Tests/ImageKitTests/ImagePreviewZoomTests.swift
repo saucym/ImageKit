@@ -61,6 +61,29 @@ final class ImagePreviewZoomTests: XCTestCase {
         XCTAssertEqual(visibleContent.midY, scrollView.bounds.midY, accuracy: 1 / UIScreen.main.scale)
     }
 
+    @MainActor func testDoubleTapZoomOutOnWideImageReturnsToFit() throws {
+        let scrollView = makeScrollView(imageSize: CGSize(width: 1200, height: 600), viewportSize: CGSize(width: 390, height: 844))
+        let content = try XCTUnwrap(scrollView.viewForZooming(in: scrollView))
+        scrollView.toggleZoom(at: CGPoint(x: 40, y: 40), animated: false)
+        scrollView.layoutIfNeeded()
+        XCTAssertEqual(scrollView.zoomScale, 2.5, accuracy: 0.001)
+        scrollView.toggleZoom(at: CGPoint(x: 180, y: 500), animated: false)
+        scrollView.layoutIfNeeded()
+        XCTAssertEqual(scrollView.zoomScale, 1, accuracy: 0.001)
+        let visibleContent = content.convert(content.bounds, to: scrollView)
+        XCTAssertEqual(visibleContent.midX, scrollView.bounds.midX, accuracy: 1)
+        XCTAssertEqual(visibleContent.midY, scrollView.bounds.midY, accuracy: 1)
+    }
+
+    @MainActor func testAnimatedZoomOutDoesNotReenterLayout() {
+        let scrollView = makeScrollView(imageSize: CGSize(width: 1200, height: 600), viewportSize: CGSize(width: 390, height: 844))
+        scrollView.toggleZoom(at: CGPoint(x: 80, y: 80), animated: false)
+        scrollView.layoutIfNeeded()
+        scrollView.toggleZoom(at: CGPoint(x: 80, y: 400), animated: true)
+        XCTAssertGreaterThanOrEqual(scrollView.zoomScale, scrollView.minimumZoomScale)
+        XCTAssertLessThanOrEqual(scrollView.zoomScale, scrollView.maximumZoomScale)
+    }
+
     @MainActor func testDoubleTapNearImageEdgeStaysWithinScrollableBounds() {
         let scrollView = makeScrollView()
         scrollView.toggleZoom(at: CGPoint(x: 2, y: 2), animated: false)
